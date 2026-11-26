@@ -55,6 +55,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         'expires_at'   => post('expires_at') ?: null,
         'notes'        => post('notes', '', 3000) ?: null,
     ];
+    $cid = (int) post('client_id');
+    $d['client_id'] = $cid && val('SELECT id FROM clients WHERE id = ?', [$cid]) ? $cid : null;
     $fp = post('ssh_fingerprint', '', 120);
     if ($fp !== '' && valid_fingerprint($fp)) {
         $d['ssh_fingerprint'] = $fp;
@@ -104,6 +106,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         if ($server) {
             db_update('servers', $d, 'id = ?', [$id]);
+            if (($server['client_id'] ?? null) != $d['client_id']) {
+                assign_server_client($id, $d['client_id']); // licenses on this server follow it
+            }
             if ((int) $server['enabled'] !== $enabled) {
                 set_server_enabled($id, (bool) $enabled);
             }
@@ -218,7 +223,9 @@ layout_start($isEdit ? 'Edit server' : 'Add server', 'servers',
       <div class="form-grid">
         <div class="field"><label>Monthly cost</label><input class="input" type="number" step="0.01" min="0" name="monthly_cost" value="<?= $v('monthly_cost') ?>" placeholder="0.00"></div>
         <div class="field"><label>Currency</label>
-          <select class="input" name="currency"><?php foreach (['INR', 'USD', 'EUR', 'GBP', 'AED'] as $c): ?><option <?= ($s['currency'] ?? 'INR') === $c ? 'selected' : '' ?>><?= $c ?></option><?php endforeach; ?></select></div>
+          <select class="input" name="currency"><?php foreach (CURRENCIES as $c): ?><option <?= ($s['currency'] ?? 'INR') === $c ? 'selected' : '' ?>><?= $c ?></option><?php endforeach; ?></select></div>
+        <div class="field col-2"><label>Used by (client) <a class="hint link" href="<?= e(url('client_edit.php')) ?>">+ Add client</a></label>
+          <select class="input" name="client_id"><?= client_select_options(isset($s['client_id']) ? (int) $s['client_id'] : null) ?></select></div>
         <div class="field col-2"><label>Next due date (renewal) <span class="muted small">— Telegram reminder before this date</span></label><input class="input" type="date" name="expires_at" value="<?= $v('expires_at') ?>"></div>
         <div class="field col-2"><label>Notes</label><textarea class="input" name="notes" rows="3" placeholder="Control panel URL, purpose, contacts…"><?= $v('notes') ?></textarea></div>
       </div>

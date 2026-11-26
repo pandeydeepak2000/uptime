@@ -9,6 +9,8 @@ if ($id && !$svc) {
     redirect('services.php');
 }
 $synced = $svc && $svc['source'] !== 'manual';
+// OVH's API gives no price, and some client areas hide it: then you can type it once (the sync keeps it)
+$priceEditable = !$synced || $svc['source'] === 'ovh' || $svc['amount'] === null;
 $providers = rows('SELECT id, name FROM providers ORDER BY name');
 $servers = rows('SELECT id, name, host FROM servers ORDER BY name');
 $errors = [];
@@ -43,7 +45,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($serverId && !val('SELECT id FROM servers WHERE id = ?', [$serverId])) {
         $serverId = null;
     }
-    $d = ['kind' => $kind, 'server_id' => $serverId, 'notes' => post('notes', '', 3000) ?: null];
+    $cid = (int) post('client_id');
+    $d = ['kind' => $kind, 'server_id' => $serverId, 'notes' => post('notes', '', 3000) ?: null,
+          'client_id' => $cid && val('SELECT id FROM clients WHERE id = ?', [$cid]) ? $cid : null];
+    if ($synced && $priceEditable) {
+        $d += [
+            'amount'   => post('amount') !== '' ? round((float) post('amount'), 2) : null,
+            'currency' => in_array(post('currency'), CURRENCIES, true) ? post('currency') : 'INR',
+            'cycle'    => in_array(post('cycle'), $cycles, true) ? post('cycle') : 'Monthly',
+        ];
+    }
     if (!$synced) {
         $d += [
             'name'        => post('name', '', 190),
@@ -82,6 +93,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             audit('service_added', $d['name']);
             flash('success', 'Added "' . $d['name'] . '" — you will get a Telegram reminder before it is due.');
         }
+        if ($serverId && $kind !== 'license' && (!$svc || ($svc['client_id'] ?? null) != $d['client_id'])) {
+            assign_server_client($serverId, $d['client_id']); // the VPS service and its server share one client
+        }
         redirect('services.php');
     }
     $svc = array_merge($svc ?? [], $d);
@@ -115,6 +129,16 @@ layout_start($isEdit ? 'Edit service' : 'Add license / service', 'services',
       <select class="input" name="server_id"><option value="">— None —</option>
         <?php foreach ($servers as $sv): ?><option value="<?= (int) $sv['id'] ?>" <?= (int) ($s['server_id'] ?? 0) === (int) $sv['id'] ? 'selected' : '' ?>><?= e($sv['name'] . ' (' . $sv['host'] . ')') ?></option><?php endforeach; ?>
       </select></div>
+    <div class="field col-2"><label>Used by (client) <a class="hint link" href="<?= e(url('client_edit.php')) ?>">+ Add client</a></label>
+      <select class="input" name="client_id"><?= client_select_options(isset($s['client_id']) ? (int) $s['client_id'] : null) ?></select></div>
+    <?php if ($synced && $priceEditable): ?>
+      <div class="field"><label>Price <span class="muted small">(provider sync gives none — kept on next sync)</span></label><input class="input" type="number" step="0.01" min="0" name="amount" value="<?= $v('amount') ?>" placeholder="0.00"></div>
+      <div class="field"><label>Currency / cycle</label>
+        <div class="row-gap">
+          <select class="input select-sm" name="currency"><?php foreach (CURRENCIES as $c): ?><option <?= ($s['currency'] ?: 'INR') === $c ? 'selected' : '' ?>><?= $c ?></option><?php endforeach; ?></select>
+          <select class="input select-sm" name="cycle"><?php foreach ($cycles as $c): ?><option <?= ($s['cycle'] ?: 'Monthly') === $c ? 'selected' : '' ?>><?= $c ?></option><?php endforeach; ?></select>
+        </div></div>
+    <?php endif; ?>
     <?php if (!$synced): ?>
       <div class="field"><label>Bought from (provider)</label>
         <select class="input" name="provider_id"><option value="">— None —</option>
@@ -124,7 +148,7 @@ layout_start($isEdit ? 'Edit service' : 'Add license / service', 'services',
       <div class="field"><label>Price</label><input class="input" type="number" step="0.01" min="0" name="amount" value="<?= $v('amount') ?>" placeholder="0.00"></div>
       <div class="field"><label>Currency / cycle</label>
         <div class="row-gap">
-          <select class="input select-sm" name="currency"><?php foreach (['INR', 'USD', 'EUR', 'GBP', 'AED'] as $c): ?><option <?= ($s['currency'] ?? 'INR') === $c ? 'selected' : '' ?>><?= $c ?></option><?php endforeach; ?></select>
+          <select class="input select-sm" name="currency"><?php foreach (CURRENCIES as $c): ?><option <?= ($s['currency'] ?? 'INR') === $c ? 'selected' : '' ?>><?= $c ?></option><?php endforeach; ?></select>
           <select class="input select-sm" name="cycle"><?php foreach ($cycles as $c): ?><option <?= ($s['cycle'] ?? 'Monthly') === $c ? 'selected' : '' ?>><?= $c ?></option><?php endforeach; ?></select>
         </div></div>
       <div class="field"><label>Next due date</label><input class="input" type="date" name="next_due" value="<?= $v('next_due') ?>"></div>

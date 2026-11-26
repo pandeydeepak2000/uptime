@@ -19,7 +19,7 @@ if (is_dir(APP_ROOT . '/storage/logs')) {
     ini_set('error_log', APP_ROOT . '/storage/logs/php-error.log');
 }
 
-foreach (['helpers', 'db', 'crypto', 'settings', 'auth', 'monitor', 'telegram', 'report', 'discover', 'whmcs', 'ovh', 'icons', 'layout'] as $f) {
+foreach (['helpers', 'db', 'crypto', 'settings', 'auth', 'monitor', 'telegram', 'report', 'discover', 'whmcs', 'ovh', 'billing', 'icons', 'layout'] as $f) {
     require __DIR__ . '/' . $f . '.php';
 }
 

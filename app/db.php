@@ -83,7 +83,7 @@ function db_update(string $table, array $data, string $where, array $params = []
     return q($sql, array_merge(array_values($data), $params))->rowCount();
 }
 
-const DB_VERSION = 5;
+const DB_VERSION = 6;
 
 /**
  * Upgrade an existing database in place (runs once per version bump).
@@ -133,7 +133,30 @@ function db_migrate(): void
         $addColumn('ALTER TABLE provider_services ADD COLUMN login_pass TEXT NULL');
         $addColumn('ALTER TABLE provider_services ADD COLUMN details TEXT NULL');
     }
+    if ($v < 6) {
+        db()->exec(db_clients_schema((string) config('db.driver', 'mysql')));
+        $addColumn('ALTER TABLE servers ADD COLUMN client_id INT NULL');
+        $addColumn('ALTER TABLE provider_services ADD COLUMN client_id INT NULL');
+    }
     setting_set('db_version', DB_VERSION);
+}
+
+/** clients: who a server / license is used for (client_id NULL = own use). */
+function db_clients_schema(string $driver): string
+{
+    $my = $driver !== 'sqlite';
+    $id = $my ? 'INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY' : 'INTEGER PRIMARY KEY AUTOINCREMENT';
+    $end = $my ? ') ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci' : ')';
+    return "CREATE TABLE IF NOT EXISTS `clients` (
+        `id` $id,
+        `name` VARCHAR(100) NOT NULL,
+        `company` VARCHAR(150) NULL,
+        `email` VARCHAR(190) NULL,
+        `phone` VARCHAR(40) NULL,
+        `color` VARCHAR(16) NULL,
+        `notes` TEXT NULL,
+        `created_at` INT NOT NULL DEFAULT 0
+    $end";
 }
 
 /** provider_services: synced (WHMCS / OVH) + manual services & licenses. */
@@ -163,6 +186,7 @@ function db_services_schema(string $driver): array
             `login_user` VARCHAR(64) NULL,
             `login_pass` TEXT NULL,
             `details` TEXT NULL,
+            `client_id` INT NULL,
             `seen_at` INT NULL,
             `created_at` INT NOT NULL DEFAULT 0
         $end",
@@ -237,6 +261,7 @@ function db_schema(string $driver): array
             `currency` VARCHAR(8) NULL,
             `expires_at` VARCHAR(10) NULL,
             `notes` TEXT NULL,
+            `client_id` INT NULL,
             `enabled` INT NOT NULL DEFAULT 1,
             `status` VARCHAR(10) NOT NULL DEFAULT 'unknown',
             `status_since` INT NULL,
@@ -288,5 +313,5 @@ function db_schema(string $driver): array
     if (!$my) {
         $indexes = array_map(fn ($s) => str_replace('CREATE INDEX', 'CREATE INDEX IF NOT EXISTS', $s), $indexes);
     }
-    return array_merge(array_values($tables), $indexes, db_services_schema($driver));
+    return array_merge(array_values($tables), $indexes, db_services_schema($driver), [db_clients_schema($driver)]);
 }

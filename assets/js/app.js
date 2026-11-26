@@ -120,12 +120,17 @@
   /* ---------- filters ---------- */
   function initFilters() {
     var targets = {};
-    $$('[data-filter-input],[data-filter-chips],[data-filter-provider]').forEach(function (el) {
-      var sel = el.getAttribute('data-filter-input') || el.getAttribute('data-filter-chips') || el.getAttribute('data-filter-provider');
+    $$('[data-filter-input],[data-filter-chips],[data-filter-provider],[data-filter-select]').forEach(function (el) {
+      var sel = el.getAttribute('data-filter-input') || el.getAttribute('data-filter-chips') || el.getAttribute('data-filter-provider') || el.getAttribute('data-filter-select');
       targets[sel] = targets[sel] || { q: '', chips: {}, provider: '' };
       var st = targets[sel];
       if (el.hasAttribute('data-filter-input')) el.addEventListener('input', function () { st.q = el.value.toLowerCase().trim(); apply(sel); });
-      if (el.hasAttribute('data-filter-provider')) el.addEventListener('change', function () { st.provider = el.value; apply(sel); });
+      if (el.hasAttribute('data-filter-provider')) { st.provider = el.value; el.addEventListener('change', function () { st.provider = el.value; apply(sel); }); }
+      if (el.hasAttribute('data-filter-select')) {
+        var skey = el.getAttribute('data-filter-key') || 'status';
+        st.chips[skey] = el.value || 'all';
+        el.addEventListener('change', function () { st.chips[skey] = el.value || 'all'; apply(sel); });
+      }
       if (el.hasAttribute('data-filter-chips')) {
         // each chip group filters one row attribute (default data-status); several groups can combine
         var key = el.getAttribute('data-filter-key') || 'status';
@@ -153,6 +158,7 @@
       });
       var empty = $('.empty-filter', root.closest('.card') || root.parentNode) || $('.empty-filter', root);
       if (empty) empty.hidden = shown > 0;
+      root.dispatchEvent(new CustomEvent('filtered'));
     }
   }
 
@@ -614,5 +620,45 @@
   };
   ['pointerdown', 'touchstart', 'focusin'].forEach(function (ev) {
     document.addEventListener(ev, unlock, true);
+  });
+})();
+
+/* Clients & Billing: tick rows, then assign them to a client from the floating bar. */
+(function () {
+  'use strict';
+  var forms = document.querySelectorAll('.assign-form');
+  Array.prototype.forEach.call(forms, function (form) {
+    var bar = form.querySelector('[data-assign-bar]');
+    var table = form.querySelector('table');
+    if (!bar || !table) return;
+    document.body.appendChild(bar); // glass cards create a containing block for position:fixed
+    var all = form.querySelector('[data-check-all]');
+    var boxes = function () { return Array.prototype.slice.call(table.querySelectorAll('[data-row-check]')); };
+    var sync = function () {
+      var n = boxes().filter(function (b) { return b.checked; }).length;
+      bar.hidden = n === 0;
+      bar.querySelector('[data-selected-count]').textContent = n;
+      if (all) {
+        var vis = boxes().filter(function (b) { return !b.closest('tr').hidden; });
+        all.checked = vis.length > 0 && vis.every(function (b) { return b.checked; });
+        all.indeterminate = !all.checked && vis.some(function (b) { return b.checked; });
+      }
+    };
+    table.addEventListener('change', function (e) {
+      if (e.target === all) {
+        boxes().forEach(function (b) { if (!b.closest('tr').hidden) b.checked = all.checked; });
+      }
+      sync();
+    });
+    // a row hidden by a filter must never be assigned by accident
+    table.addEventListener('filtered', function () {
+      boxes().forEach(function (b) { if (b.closest('tr').hidden) b.checked = false; });
+      sync();
+    });
+    bar.querySelector('[data-assign-clear]').addEventListener('click', function () {
+      boxes().forEach(function (b) { b.checked = false; });
+      sync();
+    });
+    sync();
   });
 })();

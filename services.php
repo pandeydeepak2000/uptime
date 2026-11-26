@@ -15,16 +15,11 @@ foreach ($list as $s) {
     $states[$k] = ($states[$k] ?? 0) + 1;
 }
 $counts = ['all' => count($list), 'license' => 0, 'vps' => 0, 'other' => 0, 'due7' => 0];
-$spend = [];
+$spend = money_totals(billing_items());
 foreach ($list as $s) {
     $counts[$s['kind']] = ($counts[$s['kind']] ?? 0) + 1;
     if ($s['next_due'] && strtotime($s['next_due']) - $today <= 7 * 86400 && !in_array(strtolower((string) $s['status']), ['cancelled', 'terminated'], true)) {
         $counts['due7']++;
-    }
-    if ($s['amount'] !== null && !in_array(strtolower((string) $s['status']), ['cancelled', 'terminated'], true)) {
-        $div = ['monthly' => 1, 'quarterly' => 3, 'semi-annually' => 6, 'annually' => 12, 'biennially' => 24, 'triennially' => 36][strtolower((string) $s['cycle'])] ?? 1;
-        $cur = $s['currency'] ?: 'INR';
-        $spend[$cur] = ($spend[$cur] ?? 0) + (float) $s['amount'] / $div;
     }
 }
 $canMonitor = fn ($s) => $s['kind'] === 'vps' && !$s['server_id'] && ($s['ip'] || $s['hostname'])
@@ -40,7 +35,7 @@ layout_start('Services & Licenses', 'services', 'Everything you pay for — sync
   <div class="card glass stat anim-in" style="--d:.05s"><div class="stat-ico ico-amber"><?= icon('key') ?></div><div><span class="stat-lbl">Licenses</span><b class="stat-val"><?= $counts['license'] ?></b></div></div>
   <div class="card glass stat anim-in" style="--d:.1s"><div class="stat-ico ico-green"><?= icon('server') ?></div><div><span class="stat-lbl">VPS services</span><b class="stat-val"><?= $counts['vps'] ?></b></div></div>
   <div class="card glass stat anim-in <?= $counts['due7'] ? 'stat-alert' : '' ?>" style="--d:.15s"><div class="stat-ico ico-red"><?= icon('calendar') ?></div><div><span class="stat-lbl">Due in 7 days</span><b class="stat-val"><?= $counts['due7'] ?></b></div></div>
-  <div class="card glass stat anim-in" style="--d:.2s"><div class="stat-ico ico-cyan"><?= icon('dollar') ?></div><div><span class="stat-lbl">Monthly spend</span><b class="stat-val small-val"><?= $spend ? e(implode(' + ', array_map(fn ($c, $v) => $c . ' ' . number_format($v, 0), array_keys($spend), $spend))) : '—' ?></b></div></div>
+  <div class="card glass stat anim-in" style="--d:.2s"><div class="stat-ico ico-cyan"><?= icon('dollar') ?></div><div><span class="stat-lbl"><a href="<?= e(url('clients.php')) ?>">Monthly spend ↗</a></span><b class="stat-val small-val"><?= e(money_fmt($spend, 0)) ?></b></div></div>
 </section>
 
 <?php if ($unmonitored): ?>

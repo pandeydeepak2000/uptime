@@ -847,3 +847,32 @@ thead .sticky-col { background: var(--panel-solid); }
   .dot::after { display: none; }
   a { color: #111; }
 }
+
+/* ---------- clients & billing ---------- */
+.section-title { font-size: 16px; font-weight: 700; margin: 26px 0 14px; letter-spacing: -.01em; }
+.pad-x { padding: 0 20px; margin-top: 4px; margin-bottom: 14px; }
+.pre-wrap { white-space: pre-wrap; }
+.w-check { width: 36px; }
+.w-check input, .w-check + th input { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
+.client-grid .prov-card h3 a { color: inherit; }
+.client-grid .prov-card h3 a:hover { color: var(--link-hover); }
+.client-grid .prov-card > .btn { margin-top: 14px; }
+.pay-list { display: flex; flex-direction: column; gap: 8px; }
+.pay-list.compact { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); min-height: 40px; }
+.pay-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 12px; }
+.pay-row b { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pay-list:not(.compact) .pay-row { padding: 10px 12px; border-radius: 12px; background: var(--panel-soft, rgba(127,127,127,.06)); }
+.pay-total { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--border); }
+.pay-total span { color: var(--muted); font-size: 13px; }
+.pay-total b { font-size: 17px; font-weight: 800; text-align: right; }
+.table tfoot th { border-top: 1px solid var(--border-hi); font-weight: 700; }
+.assign-bar { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 60; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 12px 16px; max-width: calc(100vw - 32px);
+  background: var(--panel-solid); border: 1px solid var(--border-hi); border-radius: 16px; box-shadow: 0 18px 50px rgba(0,0,0,.35); }
+.assign-bar[hidden] { display: none; }
+@media (max-width: 640px) {
+  .assign-bar { padding: 10px 12px; gap: 8px; }
+  .assign-bar .muted { display: none; }
+  .pad-x { padding: 0 12px; }
+}
+.table th.right { text-align: right; }
+.pay-row .prov-badge, .pay-row .pill { justify-self: start; }

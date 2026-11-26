@@ -802,7 +802,7 @@ function provider_save_services(int $providerId, array $list, bool $replace = tr
     $goodHost = fn ($h) => $h && strpos($h, '.') !== false && valid_host($h);
 
     $now = time();
-    $servers = rows('SELECT id, host, provider_id, monthly_cost, expires_at, ssh_pass FROM servers');
+    $servers = rows('SELECT id, host, provider_id, monthly_cost, expires_at, ssh_pass, client_id FROM servers');
     $byId = [];
     foreach ($servers as $srv) {
         $byId[(int) $srv['id']] = $srv;
@@ -815,7 +815,7 @@ function provider_save_services(int $providerId, array $list, bool $replace = tr
             continue; // cancelled / terminated services are not kept
         }
         $due = whmcs_parse_date($s['next_due_raw'], $order);
-        $existing = row('SELECT id, kind, server_id, ip, hostname FROM provider_services WHERE provider_id = ? AND source = ? AND remote_id = ?', [$providerId, $source, $s['id']]);
+        $existing = row('SELECT id, kind, server_id, ip, hostname, amount, client_id FROM provider_services WHERE provider_id = ? AND source = ? AND remote_id = ?', [$providerId, $source, $s['id']]);
         $ip = $s['ip'] ?: ($existing['ip'] ?? '');
         $host = $goodHost($s['hostname']) ? $s['hostname'] : ($goodHost($existing['hostname'] ?? '') ? $existing['hostname'] : '');
         $guess = service_kind($s['name'] . ' ' . $host);
@@ -872,6 +872,13 @@ function provider_save_services(int $providerId, array $list, bool $replace = tr
             $data['login_pass'] = encrypt_str($loginPass);
             $logins++;
         }
+        if ($s['amount'] === null && $existing && $existing['amount'] !== null) {
+            // provider shows no price (e.g. OVH API) — keep the price you typed in
+            unset($data['amount'], $data['currency'], $data['cycle']);
+        }
+        if (!$existing && $serverId) {
+            $data['client_id'] = $byId[$serverId]['client_id'];
+        }
         if ($existing) {
             db_update('provider_services', $data, 'id = ?', [(int) $existing['id']]);
         } else {
@@ -898,6 +905,9 @@ function service_monthly($amount, ?string $cycle): ?float
 {
     if ($amount === null) {
         return null;
+    }
+    if (preg_match('~one ?time|free~i', (string) $cycle)) {
+        return 0.0; // not a recurring cost
     }
     $div = ['monthly' => 1, 'quarterly' => 3, 'semi-annually' => 6, 'annually' => 12, 'biennially' => 24, 'triennially' => 36][strtolower((string) $cycle)] ?? 1;
     return round((float) $amount / $div, 2);
@@ -929,6 +939,7 @@ function service_to_server(int $serviceId): ?int
         'location' => isset($det['location']) ? substr((string) $det['location'], 0, 100) : null,
         'os' => isset($det['os']) ? substr((string) $det['os'], 0, 100) : null,
         'specs' => isset($det['specs']) ? substr((string) $det['specs'], 0, 190) : null,
+        'client_id' => $s['client_id'] !== null ? (int) $s['client_id'] : null,
         'notes' => 'Added from ' . $s['name'] . ' (synced service)', 'enabled' => 1, 'status' => 'unknown',
         'status_since' => time(), 'created_at' => time(),
     ]);

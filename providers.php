@@ -20,9 +20,9 @@ $svcCount = [];
 foreach (rows('SELECT provider_id, COUNT(*) AS c FROM provider_services GROUP BY provider_id') as $c) {
     $svcCount[(int) $c['provider_id']] = (int) $c['c'];
 }
-$cost = [];
-foreach (rows('SELECT provider_id, currency, SUM(monthly_cost) AS total FROM servers WHERE monthly_cost IS NOT NULL GROUP BY provider_id, currency') as $c) {
-    $cost[(int) $c['provider_id']][] = $c['currency'] . ' ' . number_format((float) $c['total'], 2);
+$byProv = [];
+foreach (billing_items() as $it) {
+    $byProv[$it['provider_id']][] = $it;
 }
 
 layout_start('Providers', 'providers', 'Hosting companies and their client-area logins.',
@@ -62,7 +62,9 @@ layout_start('Providers', 'providers', 'Hosting companies and their client-area 
         <dt>Login</dt><dd><?php if ($p['account_user']): ?><span class="mono"><?= e($p['account_user']) ?></span><button class="copy-btn" type="button" data-copy="<?= e($p['account_user']) ?>"><?= icon('copy') ?></button><?php else: ?>—<?php endif; ?>
           <?php if ($p['account_pass']): ?><button class="btn btn-ghost xs" type="button" data-reveal="provider" data-id="<?= $pid ?>" data-label="<?= e($p['name']) ?> panel"><?= icon('key') ?>Password</button><?php endif; ?></dd>
         <dt>Support</dt><dd><?= $p['support_email'] ? '<span class="mono small">' . e($p['support_email']) . '</span>' : '—' ?></dd>
-        <dt>Monthly</dt><dd><?= !empty($cost[$pid]) ? e(implode(' + ', $cost[$pid])) : '—' ?></dd>
+        <?php $its = $byProv[$pid] ?? []; $noPrice = items_unpriced($its); ?>
+        <dt>Monthly</dt><dd><b><?= e(money_fmt(money_totals($its))) ?></b>
+          <?php if ($its): ?><div class="cell-sub muted"><?= count($its) ?> paid item<?= count($its) === 1 ? '' : 's' ?><?= $noPrice ? ' · <a class="link" href="' . e(url('clients.php?provider=' . $pid)) . '">' . $noPrice . ' without price — set it</a>' : '' ?></div><?php endif; ?></dd>
       </dl>
       <div class="sync-box <?= $p['last_sync_at'] ? ((int) $p['last_sync_ok'] ? 'ok' : 'bad') : '' ?>">
         <div class="sync-head">
