@@ -18,7 +18,7 @@ Pure PHP 8 (no Composer, no build step) — just `git pull` on cPanel and it run
 
 1. **Create a database** — cPanel → *MySQL® Database Wizard* → create DB + user, grant **ALL PRIVILEGES**.
 2. **Pull the code** — cPanel → *Git™ Version Control* → **Create**
-   - Clone URL: `https://github.com/ambitionteams/uptime.git`
+   - Clone URL: `https://github.com/pandeydeepak2000/uptime.git`
    - Repository path: e.g. `/home/USER/public_html/uptime` (or the document root of a subdomain like `status.yourdomain.com`)
 3. **Run the installer** — open `https://yourdomain.com/uptime/install.php`, fill DB details + admin user. (It locks itself afterwards.)
 4. **Cron job** — cPanel → *Cron Jobs* → *Once Per Minute* `* * * * *`:
