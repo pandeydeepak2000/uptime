@@ -22,6 +22,9 @@ foreach ($list as $s) {
         $spend[$cur] = ($spend[$cur] ?? 0) + (float) $s['amount'] / $div;
     }
 }
+$canMonitor = fn ($s) => $s['kind'] === 'vps' && !$s['server_id'] && ($s['ip'] || $s['hostname'])
+    && in_array(strtolower((string) ($s['status'] ?: 'active')), ['active', 'suspended'], true);
+$unmonitored = count(array_filter($list, $canMonitor));
 $kindMeta = ['license' => ['🔑 License', 'pill-warn'], 'vps' => ['🖥 VPS', 'pill-up'], 'other' => ['📦 Other', 'pill-unknown']];
 
 layout_start('Services & Licenses', 'services', 'Everything you pay for — synced from provider client areas or added by hand.',
@@ -34,6 +37,14 @@ layout_start('Services & Licenses', 'services', 'Everything you pay for — sync
   <div class="card glass stat anim-in <?= $counts['due7'] ? 'stat-alert' : '' ?>" style="--d:.15s"><div class="stat-ico ico-red"><?= icon('calendar') ?></div><div><span class="stat-lbl">Due in 7 days</span><b class="stat-val"><?= $counts['due7'] ?></b></div></div>
   <div class="card glass stat anim-in" style="--d:.2s"><div class="stat-ico ico-cyan"><?= icon('dollar') ?></div><div><span class="stat-lbl">Monthly spend</span><b class="stat-val small-val"><?= $spend ? e(implode(' + ', array_map(fn ($c, $v) => $c . ' ' . number_format($v, 0), array_keys($spend), $spend))) : '—' ?></b></div></div>
 </section>
+
+<?php if ($unmonitored): ?>
+  <div class="card glass monitor-banner anim-in">
+    <div class="mb-text"><?= icon('server') ?><div><b><?= $unmonitored ?> VPS from your providers <?= $unmonitored > 1 ? 'are' : 'is' ?> not monitored yet.</b>
+      <p class="muted small">Add them to uptime monitoring in one click — IP, provider, price and next due date are filled in automatically. Root password can be added later.</p></div></div>
+    <button class="btn btn-primary" type="button" data-monitor-all><?= icon('plus') ?>Add all <?= $unmonitored ?> to monitoring</button>
+  </div>
+<?php endif; ?>
 
 <?php if (!$list): ?>
   <div class="card glass anim-in"><?= empty_state('key', 'No services or licenses yet',
@@ -85,6 +96,7 @@ layout_start('Services & Licenses', 'services', 'Everything you pay for — sync
             <?php else: ?>—<?php endif; ?>
           </td>
           <td class="right nowrap">
+            <?php if ($canMonitor($s)): ?><button class="btn btn-ghost xs" type="button" data-monitor-service="<?= (int) $s['id'] ?>" title="Add this VPS to uptime monitoring"><?= icon('plus') ?>Monitor</button><?php endif; ?>
             <?php if ($s['panel_url']): ?><a class="icon-btn sm" href="<?= e($s['panel_url']) ?>" target="_blank" rel="noopener noreferrer" title="Open client area"><?= icon('external') ?></a><?php endif; ?>
             <a class="icon-btn sm" href="<?= e(url('service_edit.php?id=' . (int) $s['id'])) ?>" title="Edit"><?= icon('edit') ?></a>
             <?php if ($s['source'] === 'manual'): ?>

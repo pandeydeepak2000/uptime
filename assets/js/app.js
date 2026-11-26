@@ -503,6 +503,17 @@
       });
       return;
     }
+    if ((t = e.target.closest('[data-monitor-service]')) || (t = e.target.closest('[data-monitor-all]'))) {
+      var all = t.hasAttribute('data-monitor-all');
+      setLoading(t, true);
+      if (all) toast('info', 'Adding servers and running the first check…');
+      api(all ? 'services_monitor_all' : 'service_monitor', all ? {} : { id: t.getAttribute('data-monitor-service') }).then(function (j) {
+        setLoading(t, false);
+        toast(j.ok ? 'success' : 'error', j.message || j.error);
+        if (j.ok) setTimeout(function () { location.reload(); }, 1200);
+      });
+      return;
+    }
     if ((t = e.target.closest('[data-renewal-now]'))) {
       setLoading(t, true);
       api('renewal_now', {}).then(function (j) { setLoading(t, false); toast(j.ok ? 'success' : 'error', j.message || j.error); });

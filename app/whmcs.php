@@ -215,7 +215,7 @@ class WhmcsClient
             throw new WhmcsSyncException('Could not find a login form. Check the "Client area / panel URL" (e.g. https://clients.provider.com/clientarea.php).');
         }
         if (self::hasCaptcha($page['body'])) {
-            throw new WhmcsSyncException('This provider uses a CAPTCHA on login, so automatic sync is not possible. Keep this provider manual.', 1);
+            throw new WhmcsSyncException('This provider uses a CAPTCHA on login, so automatic sync is not possible. Use “Import from saved page” on the provider card instead.', 1);
         }
 
         $fields = [];
@@ -343,6 +343,114 @@ class WhmcsClient
         return '';
     }
 
+    /** First IPv4 on/after any line labelled with "IP" (Dedicated IP, Main IP Address, Assigned IPs, IPv4…). */
+    private static function findIp(array $lines): string
+    {
+        foreach ($lines as $i => $l) {
+            if (!preg_match('/\bIP(s|v4)?\b/', $l) || preg_match('/your ip|logged in|last login|login from|ip whitelist|ipv6/i', $l)) {
+                continue;
+            }
+            $chunk = $l . ' ' . ($lines[$i + 1] ?? '') . ' ' . ($lines[$i + 2] ?? '');
+            if (preg_match_all('/\b((?:\d{1,3}\.){3}\d{1,3})\b/', $chunk, $m)) {
+                foreach ($m[1] as $cand) {
+                    if (filter_var($cand, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+                        return $cand;
+                    }
+                }
+            }
+        }
+        return '';
+    }
+
+    /** Text lines of one table cell (keeps <br>/<strong>/<a> boundaries). */
+    private static function cellLines(DOMNode $td): array
+    {
+        $html = $td->ownerDocument->saveHTML($td);
+        return self::textLines($html);
+    }
+
+    /**
+     * Parse a WHMCS "My Products & Services" page (works on a page saved by the user — no login needed).
+     * @return array same shape as services()
+     */
+    public static function parseServicesList(string $html): array
+    {
+        $x = self::dom($html);
+        $out = [];
+        foreach ($x->query('//a[contains(@href,"productdetails")] | //tr[contains(@onclick,"productdetails")] | //*[contains(@data-url,"productdetails")]') as $el) {
+            $ref = $el->getAttribute('href') . ' ' . $el->getAttribute('onclick') . ' ' . $el->getAttribute('data-url');
+            if (!preg_match('~productdetails(?:&|&amp;|/)(?:id=)?(\d+)~i', $ref, $m) || isset($out[$m[1]])) {
+                continue;
+            }
+            $id = $m[1];
+            $tr = $el;
+            while ($tr && $tr->nodeName !== 'tr' && $tr->parentNode) {
+                $tr = $tr->parentNode;
+            }
+            if (!$tr || $tr->nodeName !== 'tr') {
+                continue;
+            }
+            // header → column index
+            $cols = ['name' => 0, 'price' => 1, 'due' => 2, 'status' => 3];
+            $table = $tr;
+            while ($table && $table->nodeName !== 'table' && $table->parentNode) {
+                $table = $table->parentNode;
+            }
+            if ($table && $table->nodeName === 'table') {
+                $i = 0;
+                foreach ($x->query('.//thead//th', $table) as $th) {
+                    $t = strtolower(trim($th->textContent));
+                    if (preg_match('/product|service|name/', $t)) {
+                        $cols['name'] = $i;
+                    } elseif (preg_match('/pric|amount|billing|cost/', $t)) {
+                        $cols['price'] = $i;
+                    } elseif (preg_match('/due|renew|expir/', $t)) {
+                        $cols['due'] = $i;
+                    } elseif (preg_match('/status/', $t)) {
+                        $cols['status'] = $i;
+                    }
+                    $i++;
+                }
+            }
+            $tds = [];
+            foreach ($tr->childNodes as $c) {
+                if ($c->nodeName === 'td') {
+                    $tds[] = $c;
+                }
+            }
+            if (!$tds) {
+                continue;
+            }
+            $cell = fn ($k) => isset($tds[$cols[$k]]) ? self::cellLines($tds[$cols[$k]]) : [];
+            $nameLines = $cell('name');
+            $priceText = implode(' ', $cell('price'));
+            $dueText = implode(' ', $cell('due'));
+            $statusText = implode(' ', $cell('status'));
+            $all = implode(' ', array_map(fn ($td) => trim($td->textContent), $tds));
+            [$amount, $currency] = whmcs_parse_money($priceText);
+            $host = '';
+            foreach (array_slice($nameLines, 1) as $l) {
+                if (valid_host(strtolower($l))) {
+                    $host = strtolower($l);
+                    break;
+                }
+            }
+            $ip = preg_match('/\b((?:\d{1,3}\.){3}\d{1,3})\b/', implode(' ', $nameLines), $mm) && filter_var($mm[1], FILTER_VALIDATE_IP) ? $mm[1] : '';
+            $out[$id] = [
+                'id'           => $id,
+                'name'         => substr($nameLines[0] ?? ('Service #' . $id), 0, 190),
+                'hostname'     => $host,
+                'ip'           => $ip,
+                'status'       => substr(ucfirst(strtolower(trim(preg_match('/\b(Active|Suspended|Pending|Cancelled|Terminated|Fraud|Completed)\b/i', $statusText . ' ' . $all, $sm) ? $sm[1] : $statusText))), 0, 32),
+                'amount'       => $amount,
+                'currency'     => $currency,
+                'cycle'        => preg_match('/\b(Monthly|Quarterly|Semi-Annually|Annually|Biennially|Triennially|One Time|Free Account)\b/i', $priceText . ' ' . $all, $cm) ? $cm[1] : '',
+                'next_due_raw' => preg_match('~\d{4}-\d{2}-\d{2}|\d{1,2}[/\-.]\d{1,2}[/\-.]\d{4}|\d{1,2}(?:st|nd|rd|th)? [A-Za-z]{3,9},? \d{4}~', $dueText ?: $all, $dm) ? $dm[0] : '',
+            ];
+        }
+        return array_values($out);
+    }
+
     private function serviceDetails(string $id, array $row): array
     {
         $r = $this->req($this->base . 'clientarea.php?action=productdetails&id=' . $id);
@@ -364,8 +472,7 @@ class WhmcsClient
             $name = self::labelValue($lines, ['Product/Service', 'Product', 'Service']);
         }
 
-        $ip = self::labelValue($lines, ['Dedicated IP', 'Primary IP', 'IP Address', 'Main IP', 'Assigned IPs', 'IP']);
-        $ip = preg_match('/\b(\d{1,3}(?:\.\d{1,3}){3})\b/', $ip, $m) ? $m[1] : '';
+        $ip = self::findIp($lines);
         $hostname = self::labelValue($lines, ['Hostname', 'Domain', 'Server Name']);
         if (!$ip && preg_match('/\b(\d{1,3}(?:\.\d{1,3}){3})\b/', $hostname . ' ' . implode(' ', $row), $m)) {
             $ip = $m[1];
@@ -515,6 +622,19 @@ function provider_sync(int $providerId): array
         return $finish(false, $p['name'] . ': unexpected error — ' . substr($e->getMessage(), 0, 120), $client ? $client->trace : []);
     }
 
+    $r = provider_save_services($providerId, $list);
+    $msg = $p['name'] . ': synced ' . $r['count'] . ' service(s), ' . $r['linked'] . ' matched to your servers'
+        . ($r['gone'] ? ', ' . $r['gone'] . ' removed' : '')
+        . ($r['unmonitored'] ? ' · ' . $r['unmonitored'] . ' VPS not monitored yet (Services & Licenses → Add to monitoring)' : '') . '.';
+    return $finish(true, $msg, $client->trace);
+}
+
+/**
+ * Store a provider's service list (from sync or from an uploaded page) and link to servers.
+ * $replace = remove synced services that are no longer in the list.
+ */
+function provider_save_services(int $providerId, array $list, bool $replace = true): array
+{
     // detect day/month order from all dates
     $order = 'dmy';
     foreach ($list as $s) {
@@ -531,62 +651,112 @@ function provider_sync(int $providerId): array
 
     $now = time();
     $servers = rows('SELECT id, host, provider_id, monthly_cost, expires_at FROM servers');
+    $byId = [];
+    foreach ($servers as $srv) {
+        $byId[(int) $srv['id']] = $srv;
+    }
     $seen = [];
     $linked = 0;
     foreach ($list as $s) {
         $due = whmcs_parse_date($s['next_due_raw'], $order);
-        $kind = service_kind($s['name'] . ' ' . $s['hostname']);
-        $serverId = null;
-        foreach ($servers as $srv) {
-            if (($s['ip'] && $srv['host'] === $s['ip']) || ($s['hostname'] && $srv['host'] === $s['hostname'])) {
-                $serverId = (int) $srv['id'];
-                $linked++;
-                if ($kind !== 'license' && !in_array(strtolower($s['status']), ['cancelled', 'terminated'], true)) {
-                    $upd = [];
-                    if ($due) {
-                        $upd['expires_at'] = $due;
-                    }
-                    if (!$srv['provider_id']) {
-                        $upd['provider_id'] = $providerId;
-                    }
-                    if ($srv['monthly_cost'] === null && $s['amount'] !== null) {
-                        $div = ['monthly' => 1, 'quarterly' => 3, 'semi-annually' => 6, 'annually' => 12, 'biennially' => 24, 'triennially' => 36][strtolower($s['cycle'])] ?? 1;
-                        $upd['monthly_cost'] = round($s['amount'] / $div, 2);
-                        $upd['currency'] = $s['currency'] ?: 'INR';
-                    }
-                    if ($upd) {
-                        db_update('servers', $upd, 'id = ?', [$serverId]);
-                    }
+        $existing = row("SELECT id, kind, server_id, ip, hostname FROM provider_services WHERE provider_id = ? AND source = 'whmcs' AND remote_id = ?", [$providerId, $s['id']]);
+        $kind = $existing ? $existing['kind'] : service_kind($s['name'] . ' ' . $s['hostname']);
+        $ip = $s['ip'] ?: ($existing['ip'] ?? '');
+        $host = $s['hostname'] ?: ($existing['hostname'] ?? '');
+
+        $serverId = ($existing && $existing['server_id'] && isset($byId[(int) $existing['server_id']])) ? (int) $existing['server_id'] : null;
+        if (!$serverId) {
+            foreach ($servers as $srv) {
+                if (($ip && $srv['host'] === $ip) || ($host && $srv['host'] === $host)) {
+                    $serverId = (int) $srv['id'];
+                    break;
                 }
-                break;
+            }
+        }
+        if ($serverId) {
+            $linked++;
+            $srv = $byId[$serverId];
+            if ($kind !== 'license' && !in_array(strtolower($s['status']), ['cancelled', 'terminated'], true)) {
+                $upd = [];
+                if ($due) {
+                    $upd['expires_at'] = $due;
+                }
+                if (!$srv['provider_id']) {
+                    $upd['provider_id'] = $providerId;
+                }
+                if ($srv['monthly_cost'] === null && $s['amount'] !== null) {
+                    $upd['monthly_cost'] = service_monthly($s['amount'], $s['cycle']);
+                    $upd['currency'] = $s['currency'] ?: 'INR';
+                }
+                if ($upd) {
+                    db_update('servers', $upd, 'id = ?', [$serverId]);
+                }
             }
         }
         $data = [
             'provider_id' => $providerId, 'server_id' => $serverId, 'source' => 'whmcs', 'remote_id' => $s['id'],
-            'name' => $s['name'], 'kind' => $kind, 'hostname' => $s['hostname'] ?: null, 'ip' => $s['ip'] ?: null,
+            'name' => $s['name'], 'kind' => $kind, 'hostname' => $host ?: null, 'ip' => $ip ?: null,
             'status' => $s['status'] ?: null, 'amount' => $s['amount'], 'currency' => $s['currency'], 'cycle' => $s['cycle'] ?: null,
             'next_due' => $due, 'seen_at' => $now,
         ];
-        $existing = row("SELECT id, kind FROM provider_services WHERE provider_id = ? AND source = 'whmcs' AND remote_id = ?", [$providerId, $s['id']]);
         if ($existing) {
-            unset($data['kind']); // keep a kind the user may have corrected
             db_update('provider_services', $data, 'id = ?', [(int) $existing['id']]);
         } else {
             $data['created_at'] = $now;
             db_insert('provider_services', $data);
         }
-        $seen[] = $s['id'];
+        $seen[] = (string) $s['id'];
     }
-    // services that disappeared from the client area
     $gone = 0;
-    foreach (rows("SELECT id, remote_id FROM provider_services WHERE provider_id = ? AND source = 'whmcs'", [$providerId]) as $old) {
-        if (!in_array((string) $old['remote_id'], $seen, true)) {
-            q('DELETE FROM provider_services WHERE id = ?', [(int) $old['id']]);
-            $gone++;
+    if ($replace) {
+        foreach (rows("SELECT id, remote_id FROM provider_services WHERE provider_id = ? AND source = 'whmcs'", [$providerId]) as $old) {
+            if (!in_array((string) $old['remote_id'], $seen, true)) {
+                q('DELETE FROM provider_services WHERE id = ?', [(int) $old['id']]);
+                $gone++;
+            }
         }
     }
-    $msg = $p['name'] . ': synced ' . count($list) . ' service(s), ' . $linked . ' matched to your servers' . ($gone ? ", $gone removed" : '') . '.';
-    return $finish(true, $msg, $client->trace);
+    $unmonitored = (int) val("SELECT COUNT(*) FROM provider_services WHERE provider_id = ? AND kind = 'vps' AND server_id IS NULL
+                              AND (ip IS NOT NULL OR hostname IS NOT NULL) AND (status IS NULL OR LOWER(status) IN ('active', 'suspended'))", [$providerId]);
+    return ['count' => count($list), 'linked' => $linked, 'gone' => $gone, 'unmonitored' => $unmonitored];
+}
+
+function service_monthly($amount, ?string $cycle): ?float
+{
+    if ($amount === null) {
+        return null;
+    }
+    $div = ['monthly' => 1, 'quarterly' => 3, 'semi-annually' => 6, 'annually' => 12, 'biennially' => 24, 'triennially' => 36][strtolower((string) $cycle)] ?? 1;
+    return round((float) $amount / $div, 2);
+}
+
+/** Create a monitored server from a synced VPS service. Returns new server id or null. */
+function service_to_server(int $serviceId): ?int
+{
+    $s = row('SELECT * FROM provider_services WHERE id = ?', [$serviceId]);
+    if (!$s || $s['server_id']) {
+        return $s['server_id'] ?? null;
+    }
+    $host = $s['ip'] ?: $s['hostname'];
+    if (!$host || !valid_host($host)) {
+        return null;
+    }
+    $existing = val('SELECT id FROM servers WHERE host = ?', [$host]);
+    if ($existing) {
+        db_update('provider_services', ['server_id' => (int) $existing], 'id = ?', [$serviceId]);
+        return (int) $existing;
+    }
+    $name = $s['hostname'] && $s['hostname'] !== $host ? $s['hostname'] : $s['name'];
+    $id = db_insert('servers', [
+        'name' => substr($name, 0, 100), 'provider_id' => $s['provider_id'], 'host' => strtolower($host), 'check_type' => 'auto',
+        'ssh_port' => 22, 'ssh_user' => 'root', 'expires_at' => $s['next_due'] ?: null,
+        'monthly_cost' => service_monthly($s['amount'], $s['cycle']), 'currency' => $s['currency'] ?: 'INR',
+        'notes' => 'Added from ' . $s['name'] . ' (synced service)', 'enabled' => 1, 'status' => 'unknown',
+        'status_since' => time(), 'created_at' => time(),
+    ]);
+    db_update('provider_services', ['server_id' => $id], 'id = ?', [$serviceId]);
+    audit('server_added', $name . ' (' . $host . ') from synced service');
+    return $id;
 }
 
 /** Cron helper: sync at most one provider per run, each roughly every 12 hours. */

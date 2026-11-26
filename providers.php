@@ -71,7 +71,10 @@ layout_start('Providers', 'providers', 'Hosting companies and their client-area 
         </div>
         <p class="small sync-status"><?= $p['last_sync_at'] ? e((string) $p['last_sync_status']) . ' <span class="muted">· <span data-ago="' . (int) $p['last_sync_at'] . '">' . e(time_ago($p['last_sync_at'])) . '</span></span>' : '<span class="muted">Never synced. Works with WHMCS client areas (no CAPTCHA / 2FA).</span>' ?></p>
         <div class="sync-trace" hidden></div>
-        <button class="btn btn-ghost sm" type="button" data-sync-provider="<?= $pid ?>" <?= $p['account_pass'] && $p['panel_url'] ? '' : 'disabled title="Save client area URL, username and password first"' ?>><?= icon('refresh') ?>Sync now</button>
+        <div class="row-gap">
+          <button class="btn btn-ghost sm" type="button" data-sync-provider="<?= $pid ?>" <?= $p['account_pass'] && $p['panel_url'] ? '' : 'disabled title="Save client area URL, username and password first"' ?>><?= icon('refresh') ?>Sync now</button>
+          <a class="btn btn-ghost sm" href="<?= e(url('provider_import.php?id=' . $pid)) ?>" title="For providers with CAPTCHA / 2FA"><?= icon('download') ?>Import saved page</a>
+        </div>
       </div>
       <div class="prov-foot">
         <a class="btn btn-ghost sm" href="<?= e(url('servers.php')) ?>"><?= icon('server') ?>Servers</a>

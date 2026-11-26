@@ -141,6 +141,31 @@ try {
             $res = provider_sync((int) ($_POST['id'] ?? 0));
             json_out(['ok' => $res['ok'], 'message' => $res['message'], 'trace' => $res['trace']]);
 
+        case 'service_monitor':
+        case 'services_monitor_all':
+            if (!$isPost) {
+                json_out(['ok' => false], 405);
+            }
+            if ($action === 'service_monitor') {
+                $ids = [(int) ($_POST['id'] ?? 0)];
+            } else {
+                $pid = (int) ($_POST['provider_id'] ?? 0);
+                $ids = array_map('intval', array_column(rows("SELECT id FROM provider_services WHERE kind = 'vps' AND server_id IS NULL
+                        AND (ip IS NOT NULL OR hostname IS NOT NULL) AND (status IS NULL OR LOWER(status) IN ('active', 'suspended'))"
+                        . ($pid ? ' AND provider_id = ' . $pid : '')), 'id'));
+            }
+            $added = [];
+            foreach ($ids as $sid) {
+                $nid = service_to_server($sid);
+                if ($nid) {
+                    $added[] = $nid;
+                }
+            }
+            if ($added) {
+                run_monitor($added, true, true);
+            }
+            json_out(['ok' => (bool) $added, 'message' => $added ? count($added) . ' server(s) added to monitoring and checked' : 'Nothing to add — the service has no IP/hostname or is already monitored.']);
+
         case 'renewal_now':
             if (!$isPost) {
                 json_out(['ok' => false], 405);
