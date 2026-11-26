@@ -79,7 +79,7 @@ layout_start('Services & Licenses', 'services', 'Everything you pay for — sync
 <div class="card glass table-card anim-in">
   <div class="table-wrap">
     <table class="table" id="svcTable">
-      <thead><tr><th>Service</th><th>Type</th><th>Provider</th><th>Server / IP</th><th>Status</th><th>Price</th><th>Next due</th><th class="right">Actions</th></tr></thead>
+      <thead><tr><th>Service</th><th>Type</th><th>Provider</th><th>Server / IP</th><th>Status</th><th>Price</th><th>Next due</th><th class="right sticky-col">Actions</th></tr></thead>
       <tbody>
       <?php foreach ($list as $s):
           $k = $kindMeta[$s['kind']] ?? $kindMeta['other'];
@@ -107,7 +107,7 @@ layout_start('Services & Licenses', 'services', 'Everything you pay for — sync
               <div><span class="pill xs <?= $dead ? 'pill-unknown' : ($left < 0 ? 'pill-down' : ($left <= 3 ? 'pill-warn' : 'pill-unknown')) ?>"><?= $left < 0 ? 'Overdue ' . abs($left) . 'd' : ($left === 0 ? 'Due today' : $left . ' days') ?></span></div>
             <?php else: ?>—<?php endif; ?>
           </td>
-          <td class="right nowrap">
+          <td class="right nowrap sticky-col">
             <?php if ($canMonitor($s)): ?><button class="btn btn-ghost xs" type="button" data-monitor-service="<?= (int) $s['id'] ?>" title="Add this VPS to uptime monitoring"><?= icon('plus') ?>Monitor</button><?php endif; ?>
             <?php if ($s['panel_url']): ?><a class="icon-btn sm" href="<?= e($s['panel_url']) ?>" target="_blank" rel="noopener noreferrer" title="Open client area"><?= icon('external') ?></a><?php endif; ?>
             <a class="icon-btn sm" href="<?= e(url('service_edit.php?id=' . (int) $s['id'])) ?>" title="Edit"><?= icon('edit') ?></a>

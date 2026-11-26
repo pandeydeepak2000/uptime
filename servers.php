@@ -37,41 +37,53 @@ layout_start('Servers', 'servers', 'All VPS & dedicated servers with encrypted r
 
 <div class="card glass table-card anim-in">
   <div class="table-wrap">
-    <table class="table" id="serverTable">
+    <table class="table table-compact" id="serverTable">
       <thead>
-        <tr><th>Server</th><th>Provider</th><th>Status</th><th>Up / Down for</th><th>Uptime 24h</th><th>Uptime 30d</th><th>Response</th><th>Root access</th><th class="right">Actions</th></tr>
+        <tr><th>Server</th><th>Provider</th><th>Status</th><th>Uptime <span class="th-sub">24h · 30d</span></th><th>Response</th><th class="right sticky-col">Actions</th></tr>
       </thead>
       <tbody>
-      <?php foreach ($servers as $s): $id = (int) $s['id']; $m = status_meta($s); ?>
+      <?php foreach ($servers as $s): $id = (int) $s['id']; $m = status_meta($s); $live = in_array($m['status'], ['up', 'down'], true); ?>
         <tr data-server="<?= $id ?>" data-status="<?= e($m['status']) ?>" data-provider="<?= (int) $s['provider_id'] ?>"
             data-search="<?= e(strtolower($s['name'] . ' ' . $s['host'] . ' ' . $s['provider_name'] . ' ' . $s['location'] . ' ' . $s['os'])) ?>">
-          <td>
+          <td class="cell-server">
             <a class="cell-title" href="<?= e(url('server.php?id=' . $id)) ?>"><?= e($s['name']) ?></a>
-            <div class="cell-sub"><span class="mono"><?= e($s['host']) ?></span><button class="copy-btn" type="button" data-copy="<?= e($s['host']) ?>"><?= icon('copy') ?></button>
-              <?= $s['location'] ? '<span class="muted">· ' . e($s['location']) . '</span>' : '' ?></div>
+            <div class="cell-sub"><span class="mono"><?= e($s['host']) ?></span><button class="copy-btn" type="button" data-copy="<?= e($s['host']) ?>" title="Copy IP"><?= icon('copy') ?></button>
+              <?= $s['ssh_pass'] ? '<span class="key-ok" title="Root password saved (encrypted)">' . icon('key') . '</span>' : '' ?></div>
+            <?php if ($s['location']): ?><div class="cell-sub muted"><?= icon('pin') ?><?= e($s['location']) ?></div><?php endif; ?>
           </td>
           <td><?= provider_badge($s['provider_name'], $s['provider_color']) ?></td>
-          <td><?= status_pill($s) ?></td>
-          <td><b data-role="since" <?= in_array($m['status'], ['up', 'down'], true) ? 'data-since="' . (int) $s['status_since'] . '"' : '' ?>><?= in_array($m['status'], ['up', 'down'], true) ? e(fmt_duration(time() - (int) $s['status_since'])) : '—' ?></b></td>
-          <td><b class="txt-<?= uptime_class($rep24[$id]['uptime'] ?? null) ?>"><?= fmt_pct($rep24[$id]['uptime'] ?? null) ?></b></td>
-          <td><b class="txt-<?= uptime_class($rep30[$id]['uptime'] ?? null) ?>"><?= fmt_pct($rep30[$id]['uptime'] ?? null) ?></b></td>
-          <td class="mono" data-role="ms"><?= $s['last_response_ms'] !== null && $m['status'] === 'up' ? (int) $s['last_response_ms'] . ' ms' : '—' ?></td>
-          <td>
-            <div class="cred-mini">
-              <span class="mono"><?= e($s['ssh_user'] ?: 'root') ?>@:<?= (int) $s['ssh_port'] ?></span>
-              <?php if ($s['ssh_pass']): ?>
-                <button class="icon-btn xs" type="button" data-reveal="server" data-id="<?= $id ?>" data-label="<?= e($s['name']) ?>" title="Reveal password"><?= icon('key') ?></button>
-              <?php else: ?><span class="muted small">no pass</span><?php endif; ?>
-            </div>
+          <td class="nowrap">
+            <?= status_pill($s) ?>
+            <div class="cell-sub"><span data-role="since-label"><?= $m['status'] === 'down' ? 'Down for' : ($m['status'] === 'up' ? 'Up for' : '') ?></span>
+              <b data-role="since" <?= $live ? 'data-since="' . (int) $s['status_since'] . '"' : '' ?>><?= $live ? e(fmt_duration(time() - (int) $s['status_since'])) : '' ?></b></div>
           </td>
-          <td class="right nowrap">
-            <button class="icon-btn sm" type="button" data-check="<?= $id ?>" title="Check now"><?= icon('refresh') ?></button>
-            <button class="icon-btn sm" type="button" data-toggle-server="<?= $id ?>" title="<?= (int) $s['enabled'] ? 'Pause monitoring' : 'Resume monitoring' ?>"><?= icon((int) $s['enabled'] ? 'pause' : 'play') ?></button>
-            <a class="icon-btn sm" href="<?= e(url('server_edit.php?id=' . $id)) ?>" title="Edit"><?= icon('edit') ?></a>
-            <form method="post" action="<?= e(url('server_edit.php')) ?>" class="inline" data-confirm="Delete <?= e($s['name']) ?> and all its history? This cannot be undone.">
-              <?= csrf_field() ?><input type="hidden" name="action" value="delete"><input type="hidden" name="id" value="<?= $id ?>">
-              <button class="icon-btn sm danger" type="submit" title="Delete"><?= icon('trash') ?></button>
-            </form>
+          <td class="nowrap">
+            <b class="txt-<?= uptime_class($rep24[$id]['uptime'] ?? null) ?>"><?= fmt_pct($rep24[$id]['uptime'] ?? null) ?></b>
+            <div class="cell-sub">30d <b class="txt-<?= uptime_class($rep30[$id]['uptime'] ?? null) ?>"><?= fmt_pct($rep30[$id]['uptime'] ?? null) ?></b></div>
+          </td>
+          <td class="mono nowrap" data-role="ms"><?= $s['last_response_ms'] !== null && $m['status'] === 'up' ? (int) $s['last_response_ms'] . ' ms' : '—' ?></td>
+          <td class="right nowrap sticky-col">
+            <div class="row-actions">
+              <button class="icon-btn sm" type="button" data-check="<?= $id ?>" title="Check now"><?= icon('refresh') ?></button>
+              <a class="icon-btn sm" href="<?= e(url('server_edit.php?id=' . $id)) ?>" title="Edit"><?= icon('edit') ?></a>
+              <details class="row-menu">
+                <summary class="icon-btn sm" title="More"><?= icon('more') ?></summary>
+                <div class="menu">
+                  <a href="<?= e(url('server.php?id=' . $id)) ?>"><?= icon('external') ?>Open details</a>
+                  <?php if ($s['ssh_pass']): ?>
+                    <button type="button" data-reveal="server" data-id="<?= $id ?>" data-label="<?= e($s['name']) ?>"><?= icon('key') ?>Show root password</button>
+                  <?php else: ?>
+                    <a href="<?= e(url('server_edit.php?id=' . $id)) ?>"><?= icon('key') ?>Add root password</a>
+                  <?php endif; ?>
+                  <button type="button" data-copy="<?= e('ssh ' . ($s['ssh_user'] ?: 'root') . '@' . $s['host'] . ((int) $s['ssh_port'] !== 22 ? ' -p ' . (int) $s['ssh_port'] : '')) ?>"><?= icon('terminal') ?>Copy SSH command</button>
+                  <button type="button" data-toggle-server="<?= $id ?>"><?= icon((int) $s['enabled'] ? 'pause' : 'play') ?><?= (int) $s['enabled'] ? 'Pause monitoring' : 'Resume monitoring' ?></button>
+                  <form method="post" action="<?= e(url('server_edit.php')) ?>" data-confirm="Delete <?= e($s['name']) ?> and all its history? This cannot be undone.">
+                    <?= csrf_field() ?><input type="hidden" name="action" value="delete"><input type="hidden" name="id" value="<?= $id ?>">
+                    <button type="submit" class="danger"><?= icon('trash') ?>Delete server</button>
+                  </form>
+                </div>
+              </details>
+            </div>
           </td>
         </tr>
       <?php endforeach; ?>

@@ -561,6 +561,45 @@
     if (f && !window.confirm(f.getAttribute('data-confirm'))) e.preventDefault();
   }, true);
 
+  /* ---------- row "⋯" menus (fixed-position so table scrolling never clips them) ---------- */
+  function placeMenu(d) {
+    // move the menu to <body>: glass cards use backdrop-filter, which would trap/clip a fixed child
+    var menu = d.__menu || $('.menu', d), sum = $('summary', d);
+    if (!menu || !sum) return;
+    if (menu.parentNode !== document.body) {
+      d.__menu = menu; menu.__owner = d;
+      menu.classList.add('menu-floating');
+      document.body.appendChild(menu);
+    }
+    var r = sum.getBoundingClientRect();
+    menu.style.right = Math.max(8, window.innerWidth - r.right) + 'px';
+    menu.style.left = 'auto';
+    var h = menu.offsetHeight || 220;
+    if (r.bottom + 6 + h > window.innerHeight - 8 && r.top - 6 - h > 8) { menu.style.top = (r.top - 6 - h) + 'px'; }
+    else { menu.style.top = (r.bottom + 6) + 'px'; }
+  }
+  function closeMenus(except) {
+    $$('details.row-menu[open]').forEach(function (d) { if (d !== except) d.removeAttribute('open'); });
+    $$('.menu-floating').forEach(function (m) { if (!except || m.__owner !== except) m.hidden = true; });
+  }
+  document.addEventListener('toggle', function (e) {
+    var d = e.target;
+    if (!d.classList || !d.classList.contains('row-menu')) return;
+    if (!d.open) { if (d.__menu) d.__menu.hidden = true; return; }
+    closeMenus(d);
+    if (d.__menu) d.__menu.hidden = false;
+    placeMenu(d);
+  }, true);
+  document.addEventListener('click', function (e) {
+    var floating = e.target.closest('.menu-floating');
+    var inMenu = floating ? floating.__owner : e.target.closest('details.row-menu');
+    if (!inMenu) { closeMenus(null); return; }
+    if (e.target.closest('.menu a, .menu button[type="button"]')) setTimeout(function () { inMenu.removeAttribute('open'); if (inMenu.__menu) inMenu.__menu.hidden = true; }, 0);
+  });
+  window.addEventListener('scroll', function () { closeMenus(null); }, true);
+  window.addEventListener('resize', function () { closeMenus(null); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeMenus(null); });
+
   document.addEventListener('mouseover', showTip);
   document.addEventListener('mouseout', hideTip);
 })();
