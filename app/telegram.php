@@ -184,6 +184,87 @@ function tg_maybe_daily_report(): ?array
     return tg_send(tg_report_text($rep, 'Daily Uptime Report — last 24 hours'));
 }
 
+/* ---------------- renewal reminders ---------------- */
+
+function renewal_days_list(): array
+{
+    $days = array_map('intval', preg_split('/[\s,]+/', (string) setting('tg_renewal_days', '7,3,1,0'), -1, PREG_SPLIT_NO_EMPTY));
+    $days = array_values(array_unique(array_filter($days, fn ($d) => $d >= 0 && $d <= 90)));
+    rsort($days);
+    return $days ?: [7, 3, 1, 0];
+}
+
+/** Servers whose renewal is due. $all = everything within the largest window + overdue (for "send now"). */
+function renewal_due_list(bool $all = false): array
+{
+    $days = renewal_days_list();
+    $overdue = setting('tg_renewal_overdue') === '1';
+    $today = strtotime('today');
+    $out = [];
+    foreach (rows("SELECT s.*, p.name AS provider_name, p.panel_url FROM servers s LEFT JOIN providers p ON p.id = s.provider_id
+                   WHERE s.expires_at IS NOT NULL AND s.expires_at <> '' ORDER BY s.expires_at") as $s) {
+        $ts = strtotime($s['expires_at']);
+        if (!$ts) {
+            continue;
+        }
+        $left = (int) round(($ts - $today) / 86400);
+        $match = $all ? ($left <= max($days) && ($left >= 0 || $overdue)) : (in_array($left, $days, true) || ($left < 0 && $overdue));
+        if ($match) {
+            $out[] = $s + ['days_left' => $left];
+        }
+    }
+    return $out;
+}
+
+function renewal_text(array $list): string
+{
+    $t = "💳 <b>VPS renewal reminder</b>\n";
+    $totals = [];
+    foreach ($list as $s) {
+        $d = (int) $s['days_left'];
+        if ($d < 0) {
+            $tag = '🔴 <b>OVERDUE ' . abs($d) . ' day' . (abs($d) > 1 ? 's' : '') . '</b>';
+        } elseif ($d === 0) {
+            $tag = '🔴 <b>Due TODAY</b>';
+        } elseif ($d === 1) {
+            $tag = '🟠 <b>Due tomorrow</b>';
+        } else {
+            $tag = ($d <= 3 ? '🟠' : '🟡') . " Due in <b>$d days</b>";
+        }
+        $cost = $s['monthly_cost'] !== null ? (($s['currency'] ?: 'INR') . ' ' . number_format((float) $s['monthly_cost'], 2)) : '';
+        if ($s['monthly_cost'] !== null) {
+            $cur = $s['currency'] ?: 'INR';
+            $totals[$cur] = ($totals[$cur] ?? 0) + (float) $s['monthly_cost'];
+        }
+        $t .= "\n" . $tag . ' — ' . e(date('d M Y', strtotime($s['expires_at']))) . "\n"
+            . '🖥 ' . tg_server_line($s) . "\n"
+            . ($cost ? '💰 ' . e($cost) . "\n" : '')
+            . (!empty($s['panel_url']) ? '🔗 <a href="' . e($s['panel_url']) . '">Renew in ' . e($s['provider_name'] ?: 'client area') . "</a>\n" : '');
+    }
+    if ($totals) {
+        $t .= "\n🧾 Total: <b>" . e(implode(' + ', array_map(fn ($c, $v) => $c . ' ' . number_format($v, 2), array_keys($totals), $totals))) . '</b>';
+    }
+    return $t . "\n\nAfter paying, open the server and click <b>Mark as renewed</b> to stop reminders." . tg_footer();
+}
+
+/** Called from cron: once a day at the report time. */
+function tg_maybe_renewal_reminders(): ?array
+{
+    if (!tg_enabled() || setting('tg_renewal') !== '1') {
+        return null;
+    }
+    $today = date('Y-m-d');
+    if (date('H:i') < (string) setting('tg_report_time', '09:00') || setting('tg_last_renewal_date') === $today) {
+        return null;
+    }
+    setting_set('tg_last_renewal_date', $today);
+    $list = renewal_due_list(false);
+    if (!$list) {
+        return ['ok' => true, 'sent' => 0, 'count' => 0];
+    }
+    return tg_send(renewal_text($list)) + ['count' => count($list)];
+}
+
 function tg_send_reminders(): int
 {
     $mins = (int) setting('tg_remind_minutes', 0);

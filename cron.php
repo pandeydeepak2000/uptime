@@ -42,6 +42,11 @@ try {
         $out[] = 'Daily report: ' . ($rep['ok'] ? 'sent' : 'failed — ' . $rep['error']);
     }
 
+    $ren = tg_maybe_renewal_reminders();
+    if ($ren !== null) {
+        $out[] = 'Renewal reminders: ' . ($ren['count'] ? ($ren['ok'] ? 'sent for ' . $ren['count'] . ' server(s)' : 'failed — ' . $ren['error']) : 'none due');
+    }
+
     // Daily housekeeping
     if (setting('last_prune_date') !== date('Y-m-d')) {
         setting_set('last_prune_date', date('Y-m-d'));

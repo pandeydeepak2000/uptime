@@ -127,6 +127,17 @@ try {
                 . (!empty($ssh['ok']) ? 'read-only details fetched' : (!empty($ssh['skipped']) ? 'location only' : 'SSH: ' . $ssh['error'])));
             json_out(['ok' => true, 'geo' => $geo, 'ssh' => $ssh]);
 
+        case 'renewal_now':
+            if (!$isPost) {
+                json_out(['ok' => false], 405);
+            }
+            $list = renewal_due_list(true);
+            if (!$list) {
+                json_out(['ok' => true, 'message' => 'No renewals due in the next ' . max(renewal_days_list()) . ' days.']);
+            }
+            $res = tg_send(renewal_text($list));
+            json_out(['ok' => $res['ok'], 'message' => $res['ok'] ? 'Renewal reminder sent for ' . count($list) . ' server(s)' : 'Failed: ' . $res['error']]);
+
         case 'tg_test':
             if (!$isPost) {
                 json_out(['ok' => false], 405);

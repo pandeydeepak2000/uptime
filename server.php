@@ -104,7 +104,22 @@ layout_start($s['name'], 'servers', '<span class="mono">' . e($s['host']) . '</s
       <dt>OS</dt><dd><?= e($s['os'] ?: '—') ?></dd>
       <dt>Specs</dt><dd><?= e($s['specs'] ?: '—') ?></dd>
       <dt>Cost</dt><dd><?= $s['monthly_cost'] !== null ? e($s['currency'] . ' ' . number_format((float) $s['monthly_cost'], 2)) . ' / month' : '—' ?></dd>
-      <dt>Renewal</dt><dd><?= $s['expires_at'] ? e(date('d M Y', strtotime($s['expires_at']))) : '—' ?></dd>
+      <dt>Next due</dt><dd>
+        <?php if ($s['expires_at']):
+            $left = (int) round((strtotime($s['expires_at']) - strtotime('today')) / 86400); ?>
+          <?= e(date('d M Y', strtotime($s['expires_at']))) ?>
+          <span class="pill xs <?= $left < 0 ? 'pill-down' : ($left <= 3 ? 'pill-warn' : 'pill-unknown') ?>"><?= $left < 0 ? 'Overdue ' . abs($left) . 'd' : ($left === 0 ? 'Due today' : $left . ' days left') ?></span>
+        <?php else: ?>—<?php endif; ?>
+      </dd>
+      <dt>Mark renewed</dt><dd>
+        <form method="post" action="<?= e(url('server_edit.php')) ?>" class="renew-form" data-confirm="Mark <?= e($s['name']) ?> as renewed? The next due date moves forward from <?= e($s['expires_at'] ? date('d M Y', strtotime($s['expires_at'])) : 'today') ?>.">
+          <?= csrf_field() ?><input type="hidden" name="action" value="renew"><input type="hidden" name="id" value="<?= $id ?>">
+          <button class="btn btn-ghost xs" name="months" value="1" type="submit">+1 month</button>
+          <button class="btn btn-ghost xs" name="months" value="3" type="submit">+3 months</button>
+          <button class="btn btn-ghost xs" name="months" value="6" type="submit">+6 months</button>
+          <button class="btn btn-ghost xs" name="months" value="12" type="submit">+1 year</button>
+        </form>
+      </dd>
       <dt>Added</dt><dd><?= e(fmt_time($s['created_at'], 'd M Y')) ?></dd>
     </dl>
     <?php if ($s['notes']): ?><div class="notes"><?= nl2br(e($s['notes'])) ?></div><?php endif; ?>

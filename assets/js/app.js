@@ -472,6 +472,11 @@
       });
       return;
     }
+    if ((t = e.target.closest('[data-renewal-now]'))) {
+      setLoading(t, true);
+      api('renewal_now', {}).then(function (j) { setLoading(t, false); toast(j.ok ? 'success' : 'error', j.message || j.error); });
+      return;
+    }
     if ((t = e.target.closest('[data-tg-test]'))) {
       setLoading(t, true);
       api('tg_test', {}).then(function (j) { setLoading(t, false); toast(j.ok ? 'success' : 'error', j.message || j.error); });

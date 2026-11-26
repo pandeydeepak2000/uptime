@@ -259,6 +259,16 @@ function valid_host(string $h): bool
     return (bool) preg_match('/^([a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?)(\.[a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?)*$/i', $h);
 }
 
+/** Add whole months to a Y-m-d date, clamping to month end (31 Jan + 1 → 28/29 Feb). */
+function add_months(string $ymd, int $months): string
+{
+    $d = DateTime::createFromFormat('!Y-m-d', $ymd) ?: new DateTime('today');
+    $day = (int) $d->format('j');
+    $d->modify('first day of this month')->modify(($months >= 0 ? '+' : '') . $months . ' months');
+    $d->setDate((int) $d->format('Y'), (int) $d->format('n'), min($day, (int) $d->format('t')));
+    return $d->format('Y-m-d');
+}
+
 function initials(string $name): string
 {
     $name = trim($name);

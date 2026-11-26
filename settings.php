@@ -47,12 +47,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     throw new InvalidArgumentException('Invalid report time.');
                 }
                 setting_set('tg_chat_ids', $chats);
-                foreach (['tg_enabled', 'tg_notify_down', 'tg_notify_up', 'tg_daily_report', 'tg_login_alert'] as $k) {
+                foreach (['tg_enabled', 'tg_notify_down', 'tg_notify_up', 'tg_daily_report', 'tg_login_alert', 'tg_renewal', 'tg_renewal_overdue'] as $k) {
                     setting_set($k, isset($_POST[$k]) ? '1' : '0');
                 }
+                $rd = [];
+                foreach (preg_split('/[\s,]+/', post('tg_renewal_days', '7,3,1,0'), -1, PREG_SPLIT_NO_EMPTY) as $d) {
+                    if (!ctype_digit($d) || (int) $d > 90) {
+                        throw new InvalidArgumentException('Renewal days must be numbers between 0 and 90, e.g. 7,3,1,0');
+                    }
+                    $rd[] = (int) $d;
+                }
+                $rd = array_values(array_unique($rd));
+                rsort($rd);
+                setting_set('tg_renewal_days', $rd ? implode(',', $rd) : '7,3,1,0');
                 setting_set('tg_remind_minutes', max(0, min(1440, (int) post('tg_remind_minutes'))));
                 if ($time !== setting('tg_report_time')) {
                     setting_set('tg_last_report_date', date('H:i') >= $time ? date('Y-m-d') : '');
+                    setting_set('tg_last_renewal_date', date('H:i') >= $time ? date('Y-m-d') : '');
                 }
                 setting_set('tg_report_time', $time);
                 audit('settings_updated', 'Telegram settings');
@@ -215,15 +226,20 @@ layout_start('Settings', 'settings', 'Monitoring, Telegram alerts, security &amp
           <label class="switch"><input type="checkbox" name="tg_notify_up" <?= $chk('tg_notify_up') ?>><span class="slider"></span><span>🟢 Alert when it <b>recovers</b> (with downtime)</span></label>
           <label class="switch"><input type="checkbox" name="tg_daily_report" <?= $chk('tg_daily_report') ?>><span class="slider"></span><span>📊 Send <b>daily report</b></span></label>
           <label class="switch"><input type="checkbox" name="tg_login_alert" <?= $chk('tg_login_alert') ?>><span class="slider"></span><span>🔐 Alert on every <b>dashboard login</b></span></label>
+          <label class="switch"><input type="checkbox" name="tg_renewal" <?= $chk('tg_renewal') ?>><span class="slider"></span><span>💳 <b>Renewal reminders</b> before VPS due date</span></label>
+          <label class="switch"><input type="checkbox" name="tg_renewal_overdue" <?= $chk('tg_renewal_overdue') ?>><span class="slider"></span><span>⏰ Remind <b>daily when overdue</b> until marked renewed</span></label>
         </div>
         <div class="form-grid">
-          <div class="field"><label>Daily report time</label><input class="input" type="time" name="tg_report_time" value="<?= e(setting('tg_report_time')) ?>"></div>
+          <div class="field"><label>Daily report &amp; renewal reminder time</label><input class="input" type="time" name="tg_report_time" value="<?= e(setting('tg_report_time')) ?>"></div>
+          <div class="field"><label>Renewal reminder — days before due date</label><input class="input mono" name="tg_renewal_days" value="<?= e(setting('tg_renewal_days')) ?>" placeholder="7,3,1,0">
+            <span class="hint">0 = on the due date. Uses each server's “Next due date”.</span></div>
           <div class="field"><label>Repeat “still down” alert every</label>
             <select class="input" name="tg_remind_minutes"><?php foreach ([0 => 'Never', 15 => '15 minutes', 30 => '30 minutes', 60 => '1 hour', 180 => '3 hours', 360 => '6 hours'] as $k => $l): ?><option value="<?= $k ?>" <?= (int) setting('tg_remind_minutes') === $k ? 'selected' : '' ?>><?= $l ?></option><?php endforeach; ?></select></div>
         </div>
         <div class="form-actions">
           <button class="btn btn-ghost" type="button" data-tg-test><?= icon('send') ?>Send test message</button>
           <button class="btn btn-ghost" type="button" data-send-report data-range="24h"><?= icon('report') ?>Send 24h report now</button>
+          <button class="btn btn-ghost" type="button" data-renewal-now><?= icon('calendar') ?>Send renewal reminder now</button>
           <button class="btn btn-primary" type="submit"><?= icon('check') ?>Save</button>
         </div>
       </form>

@@ -6,7 +6,7 @@ $filter = get_param('type');
 $groups = [
     'security'   => ['login', 'logout', 'login_failed', '2fa_failed', '2fa_enabled', '2fa_disabled', 'password_changed', 'password_change_failed', 'secret_revealed', 'reveal_failed', 'reveal_locked'],
     'monitoring' => ['server_down', 'server_up', 'server_pause', 'server_resume'],
-    'changes'    => ['server_added', 'server_updated', 'server_deleted', 'provider_added', 'provider_updated', 'provider_deleted', 'settings_updated', 'report_sent', 'report_exported'],
+    'changes'    => ['server_added', 'server_updated', 'server_deleted', 'provider_added', 'provider_updated', 'provider_deleted', 'settings_updated', 'report_sent', 'report_exported', 'server_renewed', 'server_discover'],
 ];
 $sql = 'SELECT a.*, u.username FROM audit_log a LEFT JOIN users u ON u.id = a.user_id';
 $params = [];
