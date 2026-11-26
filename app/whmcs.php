@@ -441,7 +441,23 @@ class WhmcsClient
     private static function cellLines(DOMNode $td): array
     {
         $html = $td->ownerDocument->saveHTML($td);
+        // drop hidden helper text (e.g. Lagom's <span class="hidden">lagomshowservice</span>, sort keys, screen-reader labels)
+        $html = preg_replace('~<(span|div|i|small)\b[^>]*class="[^"]*\b(hidden|d-none|sr-only|visually-hidden|w-hidden)\b[^"]*"[^>]*>.*?</\1>~is', ' ', $html);
         return self::textLines($html);
+    }
+
+    /** Bold product title inside the first cell (Lagom / Six / Twenty-One all use <b>/<strong>). */
+    private static function cellTitle(DOMNode $td): string
+    {
+        foreach (['b', 'strong'] as $tag) {
+            foreach ($td->getElementsByTagName($tag) as $el) {
+                $t = trim(preg_replace('/\s+/', ' ', $el->textContent));
+                if ($t !== '' && strlen($t) > 1) {
+                    return $t;
+                }
+            }
+        }
+        return '';
     }
 
     /**
@@ -513,7 +529,7 @@ class WhmcsClient
             $ip = preg_match('/\b((?:\d{1,3}\.){3}\d{1,3})\b/', implode(' ', $nameLines), $mm) && filter_var($mm[1], FILTER_VALIDATE_IP) ? $mm[1] : '';
             $out[$id] = [
                 'id'           => $id,
-                'name'         => substr($nameLines[0] ?? ('Service #' . $id), 0, 190),
+                'name'         => substr((isset($tds[$cols['name']]) ? self::cellTitle($tds[$cols['name']]) : '') ?: ($nameLines[0] ?? ('Service #' . $id)), 0, 190),
                 'hostname'     => $host,
                 'ip'           => $ip,
                 'status'       => substr(ucfirst(strtolower(trim(preg_match('/\b(Active|Suspended|Pending|Cancelled|Terminated|Fraud|Completed)\b/i', $statusText . ' ' . $all, $sm) ? $sm[1] : $statusText))), 0, 32),
@@ -687,6 +703,9 @@ function service_kind(string $name): string
 {
     if (preg_match('/licen[cs]e|cpanel|whm|plesk|litespeed|lsws|cloudlinux|softaculous|imunify|jetbackup|sitepad|directadmin|kernelcare|whmreseller|virtualizor|solusvm/i', $name)) {
         return 'license';
+    }
+    if (preg_match('/reseller|shared hosting|web hosting|email hosting|domain/i', $name) && !preg_match('/vps|vds|kvm/i', $name)) {
+        return 'other';
     }
     if (preg_match('/vps|kvm|vds|cloud|server|dedicated|ssd|nvme|openvz|ryzen|xeon|epyc/i', $name)) {
         return 'vps';
