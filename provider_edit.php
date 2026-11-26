@@ -41,11 +41,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $errors[] = 'Support email is invalid.';
     }
     $pw = (string) ($_POST['account_pass'] ?? '');
+    $apiType = post('api_type') === 'ovh' ? 'ovh' : 'whmcs';
+    $d['api_type'] = $apiType;
+
+    // 2FA secret for WHMCS client areas (base32 key shown under the provider's QR code)
+    $totp = strtoupper(preg_replace('/[^A-Za-z2-7]/', '', post('totp_secret')));
+    if ($totp !== '' && (strlen($totp) < 16 || base32_decode($totp) === '')) {
+        $errors[] = '2FA secret key looks wrong — it is the long code shown under the QR code (letters A–Z and digits 2–7).';
+    }
+
+    // OVH API credentials (kept encrypted; blank fields keep the saved value)
+    $oldCfg = json_decode(decrypt_str($prov['api_config'] ?? ''), true) ?: [];
+    $ovh = [
+        'endpoint'     => array_key_exists(post('ovh_endpoint'), OVH_ENDPOINTS) ? post('ovh_endpoint') : ($oldCfg['endpoint'] ?? 'ovh-eu'),
+        'app_key'      => post('ovh_app_key', '', 100) ?: ($oldCfg['app_key'] ?? ''),
+        'app_secret'   => post('ovh_app_secret', '', 100) ?: ($oldCfg['app_secret'] ?? ''),
+        'consumer_key' => post('ovh_consumer_key', '', 100) ?: ($oldCfg['consumer_key'] ?? ''),
+    ];
+    if ($apiType === 'ovh' && (!$ovh['app_key'] || !$ovh['app_secret'] || !$ovh['consumer_key'])) {
+        $errors[] = 'For OVHcloud API enter the application key, application secret and consumer key.';
+    }
     if (!$errors) {
         if ($pw !== '') {
             $d['account_pass'] = encrypt_str($pw);
         } elseif (isset($_POST['clear_pass'])) {
             $d['account_pass'] = null;
+        }
+        if ($totp !== '') {
+            $d['totp_secret'] = encrypt_str($totp);
+        } elseif (isset($_POST['clear_totp'])) {
+            $d['totp_secret'] = null;
+        }
+        if ($apiType === 'ovh') {
+            $d['api_config'] = encrypt_str(json_encode($ovh));
         }
         if ($prov) {
             db_update('providers', $d, 'id = ?', [$id]);
@@ -87,9 +115,46 @@ layout_start($isEdit ? 'Edit provider' : 'Add provider', 'providers', 'Hosting c
     </div>
     <div class="field col-2"><label>Support email</label><input class="input" type="email" name="support_email" value="<?= $v('support_email') ?>"></div>
     <div class="field col-2"><label>Notes</label><textarea class="input" name="notes" rows="3"><?= $v('notes') ?></textarea></div>
+    <?php $apiType = ($p['api_type'] ?? '') === 'ovh' ? 'ovh' : 'whmcs'; $cfgView = json_decode(decrypt_str($p['api_config'] ?? ''), true) ?: []; ?>
+    <h4 class="form-section">Automatic sync</h4>
+    <div class="field col-2">
+      <div class="seg" data-api-picker>
+        <label><input type="radio" name="api_type" value="whmcs" <?= $apiType === 'whmcs' ? 'checked' : '' ?>><span>WHMCS client area (login)</span></label>
+        <label><input type="radio" name="api_type" value="ovh" <?= $apiType === 'ovh' ? 'checked' : '' ?>><span>OVHcloud API (keys)</span></label>
+      </div>
+    </div>
+
+    <div class="field col-2" data-api="whmcs">
+      <label>2FA secret key <span class="muted small">(only if this client area asks for a 2FA code)</span>
+        <?= !empty($p['totp_secret']) ? '<span class="pill pill-up xs">' . icon('lock') . 'saved &amp; encrypted</span>' : '' ?></label>
+      <input class="input mono" name="totp_secret" placeholder="<?= !empty($p['totp_secret']) ? 'Saved — leave blank to keep' : 'e.g. JBSWY3DPEHPK3PXP… (text under the QR code)' ?>" autocomplete="off">
+      <span class="hint">With this key the dashboard generates the 6-digit code itself, so daily auto-sync works. Without it you can still type the code each time you click <b>Sync now</b>.
+        Note: storing it next to the password means both factors live here (encrypted).</span>
+      <?php if (!empty($p['totp_secret'])): ?><label class="check mt-1"><input type="checkbox" name="clear_totp"> Remove saved 2FA key</label><?php endif; ?>
+    </div>
+
+    <div class="col-2 form-grid" data-api="ovh">
+      <div class="field col-2"><label>OVH region</label>
+        <select class="input" name="ovh_endpoint"><?php foreach (OVH_ENDPOINTS as $k => $ep): ?><option value="<?= e($k) ?>" <?= ($cfgView['endpoint'] ?? 'ovh-eu') === $k ? 'selected' : '' ?>><?= e($ep['label']) ?></option><?php endforeach; ?></select></div>
+      <div class="field"><label>Application key</label><input class="input mono" name="ovh_app_key" placeholder="<?= !empty($cfgView['app_key']) ? 'Saved — blank keeps it' : '' ?>" autocomplete="off"></div>
+      <div class="field"><label>Application secret</label><input class="input mono" type="password" name="ovh_app_secret" placeholder="<?= !empty($cfgView['app_secret']) ? 'Saved — blank keeps it' : '' ?>" autocomplete="new-password"></div>
+      <div class="field col-2"><label>Consumer key</label><input class="input mono" type="password" name="ovh_consumer_key" placeholder="<?= !empty($cfgView['consumer_key']) ? 'Saved — blank keeps it' : '' ?>" autocomplete="new-password"></div>
+      <div class="col-2 callout">
+        <div class="callout-title"><?= icon('key') ?>Create read-only OVH keys (2 minutes)</div>
+        <ol class="import-steps">
+          <li>Open the token page for your region and log in to OVH:
+            <?php foreach (OVH_ENDPOINTS as $k => $ep): ?><a class="link" href="<?= e(ovh_token_url($k)) ?>" target="_blank" rel="noopener noreferrer"><?= e(strtoupper(substr($k, 4))) ?> ↗</a> <?php endforeach; ?></li>
+          <li>The rights are pre-filled with <b>GET only</b> (/me, /vps, /dedicated/server). Set validity to <b>Unlimited</b> and create.</li>
+          <li>Paste the <b>Application Key</b>, <b>Application Secret</b> and <b>Consumer Key</b> here and Save.</li>
+        </ol>
+        <p class="muted small">GET-only keys can read servers but cannot reboot, reinstall, order or delete anything.</p>
+      </div>
+    </div>
+
     <div class="col-2 sync-optin">
-      <label class="switch"><input type="checkbox" name="sync_enabled" <?= (int) ($p['sync_enabled'] ?? 0) ? 'checked' : '' ?>><span class="slider"></span><span><b>Auto-sync services daily</b> from this client area (WHMCS)</span></label>
-      <p class="muted small">Logs in with the login above, reads <b>My Services</b> (name, IP, status, price, next due date) and logs out. <b>Read-only</b> — it never orders, pays, cancels or changes anything. Stops automatically if the provider uses CAPTCHA or 2FA. Your provider may email you a “new login” notice each time.</p>
+      <label class="switch"><input type="checkbox" name="sync_enabled" <?= (int) ($p['sync_enabled'] ?? 0) ? 'checked' : '' ?>><span class="slider"></span><span><b>Auto-sync services daily</b></span></label>
+      <p class="muted small"><b>Read-only.</b> WHMCS: logs in, reads <b>My Services</b> (name, IP, status, price, next due date, and root login if the provider shows it) and logs out. OVH: reads servers through the API.
+        Never orders, pays, cancels or changes anything. Pauses itself on login problems. Your provider may email a “new login” notice each time.</p>
     </div>
   </div>
   <div class="form-actions">

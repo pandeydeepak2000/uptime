@@ -8,7 +8,7 @@ if ($id && !$svc) {
     flash('error', 'Service not found.');
     redirect('services.php');
 }
-$synced = $svc && $svc['source'] === 'whmcs';
+$synced = $svc && $svc['source'] !== 'manual';
 $providers = rows('SELECT id, name FROM providers ORDER BY name');
 $servers = rows('SELECT id, name, host FROM servers ORDER BY name');
 $errors = [];

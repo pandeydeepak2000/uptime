@@ -8,7 +8,7 @@ $providers = rows('SELECT p.*, COUNT(s.id) AS total,
                           SUM(CASE WHEN s.enabled = 0 THEN 1 ELSE 0 END) AS paused_count
                    FROM providers p LEFT JOIN servers s ON s.provider_id = p.id
                    GROUP BY p.id, p.name, p.website, p.panel_url, p.account_user, p.account_pass, p.support_email, p.color, p.notes, p.created_at,
-                            p.sync_enabled, p.last_sync_at, p.last_sync_ok, p.last_sync_status
+                            p.sync_enabled, p.last_sync_at, p.last_sync_ok, p.last_sync_status, p.api_type, p.api_config, p.totp_secret
                    ORDER BY p.name');
 $uptime = [];
 foreach (build_report(strtotime('today -29 days'), time())['servers'] as $r) {
@@ -66,13 +66,14 @@ layout_start('Providers', 'providers', 'Hosting companies and their client-area 
       </dl>
       <div class="sync-box <?= $p['last_sync_at'] ? ((int) $p['last_sync_ok'] ? 'ok' : 'bad') : '' ?>">
         <div class="sync-head">
-          <span><?= icon('refresh') ?><b>Client-area sync</b> <?= (int) $p['sync_enabled'] ? '<span class="pill pill-up xs">Auto daily</span>' : '<span class="pill pill-unknown xs">Manual</span>' ?></span>
+          <span><?= icon('refresh') ?><b><?= ($p['api_type'] ?? '') === 'ovh' ? 'OVHcloud API sync' : 'Client-area sync' ?></b> <?= (int) $p['sync_enabled'] ? '<span class="pill pill-up xs">Auto daily</span>' : '<span class="pill pill-unknown xs">Manual</span>' ?>
+            <?= !empty($p['totp_secret']) && ($p['api_type'] ?? '') !== 'ovh' ? '<span class="pill pill-up xs" title="2FA code generated automatically">2FA key</span>' : '' ?></span>
           <span class="muted small"><?= (int) ($svcCount[$pid] ?? 0) ?> service(s)</span>
         </div>
         <p class="small sync-status"><?= $p['last_sync_at'] ? e((string) $p['last_sync_status']) . ' <span class="muted">· <span data-ago="' . (int) $p['last_sync_at'] . '">' . e(time_ago($p['last_sync_at'])) . '</span></span>' : '<span class="muted">Never synced. Works with WHMCS client areas (no CAPTCHA / 2FA).</span>' ?></p>
         <div class="sync-trace" hidden></div>
         <div class="row-gap">
-          <button class="btn btn-ghost sm" type="button" data-sync-provider="<?= $pid ?>" <?= $p['account_pass'] && $p['panel_url'] ? '' : 'disabled title="Save client area URL, username and password first"' ?>><?= icon('refresh') ?>Sync now</button>
+          <button class="btn btn-ghost sm" type="button" data-sync-provider="<?= $pid ?>" <?= (($p['api_type'] ?? '') === 'ovh' ? $p['api_config'] : ($p['account_pass'] && $p['panel_url'])) ? '' : 'disabled title="Save the login (or OVH API keys) in Edit first"' ?>><?= icon('refresh') ?>Sync now</button>
           <a class="btn btn-ghost sm" href="<?= e(url('provider_import.php?id=' . $pid)) ?>" title="For providers with CAPTCHA / 2FA"><?= icon('download') ?>Import saved page</a>
         </div>
       </div>

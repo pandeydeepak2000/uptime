@@ -138,7 +138,7 @@ layout_start($s['name'], 'servers', '<span class="mono">' . e($s['host']) . '</s
     <tbody>
     <?php foreach ($services as $sv): $l = $sv['next_due'] ? (int) round((strtotime($sv['next_due']) - strtotime('today')) / 86400) : null; ?>
       <tr>
-        <td><b><?= e($sv['name']) ?></b> <span class="muted small"><?= $sv['kind'] === 'license' ? '🔑' : '' ?> <?= $sv['source'] === 'whmcs' ? 'synced' : 'manual' ?></span></td>
+        <td><b><?= e($sv['name']) ?></b> <span class="muted small"><?= $sv['kind'] === 'license' ? '🔑' : '' ?> <?= $sv['source'] !== 'manual' ? 'synced' : 'manual' ?></span></td>
         <td><?= e($sv['provider_name'] ?? '—') ?></td>
         <td class="nowrap"><?= $sv['amount'] !== null ? e(($sv['currency'] ?? '') . ' ' . number_format((float) $sv['amount'], 2) . ' ' . strtolower((string) $sv['cycle'])) : '—' ?></td>
         <td class="nowrap"><?= $sv['next_due'] ? e(date('d M Y', strtotime($sv['next_due']))) . ' <span class="pill xs ' . ($l < 0 ? 'pill-down' : ($l <= 3 ? 'pill-warn' : 'pill-unknown')) . '">' . ($l < 0 ? 'Overdue' : $l . 'd') . '</span>' : '—' ?></td>

@@ -23,6 +23,9 @@ class WhmcsClient
     private $ch;
     private string $base;
     public array $trace = [];
+    /** 2FA: base32 secret (auto-generates codes) or a one-time 6-digit code typed by the user */
+    public string $totpSecret = '';
+    public string $oneTimeCode = '';
 
     public function __construct(string $panelUrl)
     {
@@ -189,6 +192,25 @@ class WhmcsClient
         return $forms && $forms->length ? $forms->item(0) : null;
     }
 
+    /** WHMCS two-factor challenge: a form with a code input and no password field. Returns [form, fieldName] or null. */
+    private static function twoFactorForm(string $html): ?array
+    {
+        if (!preg_match('~two.?factor|2fa|authenticat|verification code|security code|backup ?code~i', $html)) {
+            return null;
+        }
+        $x = self::dom($html);
+        foreach ($x->query('//form[not(.//input[@type="password"])]') ?: [] as $form) {
+            foreach ($form->getElementsByTagName('input') as $in) {
+                $name = $in->getAttribute('name');
+                $type = strtolower($in->getAttribute('type') ?: 'text');
+                if (in_array($type, ['text', 'number', 'tel'], true) && preg_match('~^(key|code|twofa|otp|verifycode|verificationcode|answer|token_2fa|2fa)$~i', $name)) {
+                    return [$form, $name];
+                }
+            }
+        }
+        return null;
+    }
+
     private static function isLoggedIn(string $html): bool
     {
         return (bool) preg_match('~(logout\.php|rp=/?logout|action=logout|/logout["\'])~i', $html) && !self::loginForm($html);
@@ -249,8 +271,27 @@ class WhmcsClient
         unset($fields, $pass);
         $html = $r['body'];
 
-        if (preg_match('~two.?factor|2fa|backup ?code|authenticator|name="key"~i', $html) && !self::isLoggedIn($html)) {
-            throw new WhmcsSyncException('This account has two-factor authentication on the provider side, so automatic sync is not possible.', 1);
+        if (!self::isLoggedIn($html) && ($tf = self::twoFactorForm($html))) {
+            [$tfForm, $codeField] = $tf;
+            $code = $this->totpSecret !== '' ? totp_code($this->totpSecret, (int) floor(time() / 30)) : $this->oneTimeCode;
+            if ($code === '') {
+                throw new WhmcsSyncException('This provider asks for a two-factor (2FA) code. Enter the current 6-digit code when you click Sync now, or save the 2FA secret key in the provider settings for automatic daily sync.', 2);
+            }
+            $tfFields = [];
+            foreach ($tfForm->getElementsByTagName('input') as $in) {
+                $n = $in->getAttribute('name');
+                if ($n !== '' && strtolower($in->getAttribute('type')) === 'hidden') {
+                    $tfFields[$n] = $in->getAttribute('value');
+                }
+            }
+            $tfFields[$codeField] = $code;
+            $this->step('2FA step: sending ' . ($this->totpSecret !== '' ? 'generated' : 'entered') . ' code');
+            $r = $this->req(self::absolute($tfForm->getAttribute('action'), $r['url']), $tfFields, $r['url']);
+            $html = $r['body'];
+            if (!self::isLoggedIn($html)) {
+                $said = self::alertText($html);
+                throw new WhmcsSyncException('2FA code was not accepted' . ($said ? ' — provider says: “' . $said . '”' : '') . '. Codes change every 30 seconds — try again with a fresh code' . ($this->totpSecret !== '' ? ' (check the saved 2FA secret and that the server clock is correct)' : '') . '.', 1);
+            }
         }
         if (!self::isLoggedIn($html)) {
             $said = self::alertText($html);
@@ -301,6 +342,8 @@ class WhmcsClient
                     'currency'     => $s['currency'] ?: $d['currency'],
                     'cycle'        => $s['cycle'] ?: $d['cycle'],
                     'next_due_raw' => $s['next_due_raw'] ?: $d['next_due_raw'],
+                    'login_user'   => $d['login_user'],
+                    'login_pass'   => $d['login_pass'],
                 ];
             }
             return $out;
@@ -539,7 +582,28 @@ class WhmcsClient
         }
         [$amount, $currency] = whmcs_parse_money($amountRaw);
 
+        // Server login shown on the product page (many VPS providers display root user/password here)
+        $bad = '~^(\*+|•+|\.+|change|reset|show|hide|copy|click|view|manage|n/?a|-)\b~i';
+        $loginUser = self::labelValue($lines, ['Root Username', 'Root User', 'Username', 'User Name', 'Login User']);
+        $loginUser = preg_match('/^[a-z_][a-z0-9_.\-]{0,31}$/i', $loginUser) ? $loginUser : '';
+        $loginPass = '';
+        foreach ($x->query('//input[(contains(translate(@name,"PASWORD","pasword"),"password") or contains(translate(@id,"PASWORD","pasword"),"password")) and @value!=""]') ?: [] as $in) {
+            $v = trim($in->getAttribute('value'));
+            if ($v !== '' && strlen($v) <= 128 && !preg_match($bad, $v)) {
+                $loginPass = $v;
+                break;
+            }
+        }
+        if ($loginPass === '') {
+            $v = self::labelValue($lines, ['Root Password', 'Server Password', 'Password']);
+            if ($v !== '' && strlen($v) <= 128 && strpos($v, ' ') === false && !preg_match($bad, $v)) {
+                $loginPass = $v;
+            }
+        }
+
         return [
+            'login_user'   => $loginPass !== '' ? ($loginUser ?: 'root') : '',
+            'login_pass'   => $loginPass,
             'id'           => $id,
             'name'         => substr($name !== '' ? $name : 'Service #' . $id, 0, 190),
             'hostname'     => substr(strpos($hostname, '.') !== false && valid_host(strtolower($hostname)) ? strtolower($hostname) : '', 0, 190),
@@ -633,20 +697,36 @@ function service_kind(string $name): string
 /**
  * Sync one provider. Returns ['ok'=>bool,'message'=>string,'trace'=>[]]
  */
-function provider_sync(int $providerId): array
+function provider_sync(int $providerId, string $oneTimeCode = ''): array
 {
     $p = row('SELECT * FROM providers WHERE id = ?', [$providerId]);
     if (!$p) {
         return ['ok' => false, 'message' => 'Provider not found', 'trace' => []];
     }
-    $finish = function (bool $ok, string $msg, array $trace) use ($providerId) {
+    $finish = function (bool $ok, string $msg, array $trace, array $extra = []) use ($providerId) {
         db_update('providers', ['last_sync_at' => time(), 'last_sync_ok' => $ok ? 1 : 0, 'last_sync_status' => substr($msg, 0, 250)], 'id = ?', [$providerId]);
         audit('provider_sync', $msg);
-        return ['ok' => $ok, 'message' => $msg, 'trace' => $trace];
+        return ['ok' => $ok, 'message' => $msg, 'trace' => $trace] + $extra;
     };
     if (!function_exists('curl_init') || !class_exists('DOMDocument')) {
         return $finish(false, $p['name'] . ': PHP cURL/DOM extension missing on this hosting.', []);
     }
+
+    // ---- OVHcloud API ----
+    if (($p['api_type'] ?? '') === 'ovh') {
+        $trace = [];
+        try {
+            $cfg = json_decode(decrypt_str($p['api_config']), true) ?: [];
+            $list = ovh_services($cfg, $trace);
+        } catch (Throwable $e) {
+            return $finish(false, $p['name'] . ': ' . $e->getMessage(), $trace);
+        }
+        $r = provider_save_services($providerId, $list, true, 'ovh');
+        return $finish(true, $p['name'] . ': synced ' . $r['count'] . ' server(s) from OVHcloud API, ' . $r['linked'] . ' matched'
+            . ($r['unmonitored'] ? ' · ' . $r['unmonitored'] . ' not monitored yet' : '') . '.', $trace);
+    }
+
+    // ---- WHMCS client area ----
     $pass = decrypt_str($p['account_pass']);
     if (!$p['panel_url'] || !$p['account_user'] || $pass === '') {
         return $finish(false, $p['name'] . ': save the client area URL, panel username and password first.', []);
@@ -654,18 +734,20 @@ function provider_sync(int $providerId): array
     $client = null;
     try {
         $client = new WhmcsClient($p['panel_url']);
+        $client->totpSecret = strtoupper(preg_replace('/[^A-Za-z2-7]/', '', decrypt_str($p['totp_secret'] ?? '')));
+        $client->oneTimeCode = preg_replace('/\D/', '', $oneTimeCode);
         $client->login($p['account_user'], $pass);
         unset($pass);
         $list = $client->services();
         $client->logout();
     } catch (WhmcsSyncException $e) {
         $msg = $p['name'] . ': ' . $e->getMessage();
-        if ($e->getCode() === 1 && (int) $p['sync_enabled']) {
+        if (in_array($e->getCode(), [1, 2], true) && (int) $p['sync_enabled']) {
             // login-type problem: stop automatic retries so the provider doesn't lock the account / ban our IP
             db_update('providers', ['sync_enabled' => 0], 'id = ?', [$providerId]);
             $msg .= ' Auto-sync paused.';
         }
-        return $finish(false, $msg, $client ? $client->trace : []);
+        return $finish(false, $msg, $client ? $client->trace : [], $e->getCode() === 2 ? ['needs_2fa' => true] : []);
     } catch (Throwable $e) {
         log_file('app.log', 'sync ' . $p['name'] . ': ' . $e->getMessage());
         return $finish(false, $p['name'] . ': unexpected error — ' . substr($e->getMessage(), 0, 120), $client ? $client->trace : []);
@@ -674,15 +756,16 @@ function provider_sync(int $providerId): array
     $r = provider_save_services($providerId, $list);
     $msg = $p['name'] . ': synced ' . $r['count'] . ' service(s), ' . $r['linked'] . ' matched to your servers'
         . ($r['gone'] ? ', ' . $r['gone'] . ' removed' : '')
+        . ($r['logins'] ? ', ' . $r['logins'] . ' root login(s) saved (encrypted)' : '')
         . ($r['unmonitored'] ? ' · ' . $r['unmonitored'] . ' VPS not monitored yet (Services & Licenses → Add to monitoring)' : '') . '.';
     return $finish(true, $msg, $client->trace);
 }
 
 /**
- * Store a provider's service list (from sync or from an uploaded page) and link to servers.
+ * Store a provider's service list (from sync, OVH API or an uploaded page) and link to servers.
  * $replace = remove synced services that are no longer in the list.
  */
-function provider_save_services(int $providerId, array $list, bool $replace = true): array
+function provider_save_services(int $providerId, array $list, bool $replace = true, string $source = 'whmcs'): array
 {
     // detect day/month order from all dates
     $order = 'dmy';
@@ -697,24 +780,30 @@ function provider_save_services(int $providerId, array $list, bool $replace = tr
             }
         }
     }
+    $goodHost = fn ($h) => $h && strpos($h, '.') !== false && valid_host($h);
 
     $now = time();
-    $servers = rows('SELECT id, host, provider_id, monthly_cost, expires_at FROM servers');
+    $servers = rows('SELECT id, host, provider_id, monthly_cost, expires_at, ssh_pass FROM servers');
     $byId = [];
     foreach ($servers as $srv) {
         $byId[(int) $srv['id']] = $srv;
     }
     $seen = [];
     $linked = 0;
+    $logins = 0;
     foreach ($list as $s) {
         if (service_is_ended($s['status'])) {
             continue; // cancelled / terminated services are not kept
         }
         $due = whmcs_parse_date($s['next_due_raw'], $order);
-        $existing = row("SELECT id, kind, server_id, ip, hostname FROM provider_services WHERE provider_id = ? AND source = 'whmcs' AND remote_id = ?", [$providerId, $s['id']]);
-        $kind = $existing ? $existing['kind'] : service_kind($s['name'] . ' ' . $s['hostname']);
+        $existing = row('SELECT id, kind, server_id, ip, hostname FROM provider_services WHERE provider_id = ? AND source = ? AND remote_id = ?', [$providerId, $source, $s['id']]);
         $ip = $s['ip'] ?: ($existing['ip'] ?? '');
-        $host = $s['hostname'] ?: ($existing['hostname'] ?? '');
+        $host = $goodHost($s['hostname']) ? $s['hostname'] : ($goodHost($existing['hostname'] ?? '') ? $existing['hostname'] : '');
+        $guess = service_kind($s['name'] . ' ' . $host);
+        // re-classify entries that were stored as "other" because of a placeholder name
+        $kind = ($existing && !($existing['kind'] === 'other' && $guess !== 'other')) ? $existing['kind'] : $guess;
+        $loginPass = (string) ($s['login_pass'] ?? '');
+        $loginUser = (string) ($s['login_user'] ?? '');
 
         $serverId = ($existing && $existing['server_id'] && isset($byId[(int) $existing['server_id']])) ? (int) $existing['server_id'] : null;
         if (!$serverId) {
@@ -728,7 +817,7 @@ function provider_save_services(int $providerId, array $list, bool $replace = tr
         if ($serverId) {
             $linked++;
             $srv = $byId[$serverId];
-            if ($kind !== 'license' && !in_array(strtolower($s['status']), ['cancelled', 'terminated'], true)) {
+            if ($kind !== 'license') {
                 $upd = [];
                 if ($due) {
                     $upd['expires_at'] = $due;
@@ -740,17 +829,30 @@ function provider_save_services(int $providerId, array $list, bool $replace = tr
                     $upd['monthly_cost'] = service_monthly($s['amount'], $s['cycle']);
                     $upd['currency'] = $s['currency'] ?: 'INR';
                 }
+                if ($loginPass !== '' && empty($srv['ssh_pass'])) {
+                    // never overwrite a password you saved yourself
+                    $upd['ssh_pass'] = encrypt_str($loginPass);
+                    $upd['ssh_user'] = $loginUser ?: 'root';
+                }
                 if ($upd) {
                     db_update('servers', $upd, 'id = ?', [$serverId]);
                 }
             }
         }
         $data = [
-            'provider_id' => $providerId, 'server_id' => $serverId, 'source' => 'whmcs', 'remote_id' => $s['id'],
+            'provider_id' => $providerId, 'server_id' => $serverId, 'source' => $source, 'remote_id' => $s['id'],
             'name' => $s['name'], 'kind' => $kind, 'hostname' => $host ?: null, 'ip' => $ip ?: null,
             'status' => $s['status'] ?: null, 'amount' => $s['amount'], 'currency' => $s['currency'], 'cycle' => $s['cycle'] ?: null,
             'next_due' => $due, 'seen_at' => $now,
         ];
+        if (!empty($s['details'])) {
+            $data['details'] = json_encode($s['details'], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        }
+        if ($loginPass !== '') {
+            $data['login_user'] = $loginUser ?: 'root';
+            $data['login_pass'] = encrypt_str($loginPass);
+            $logins++;
+        }
         if ($existing) {
             db_update('provider_services', $data, 'id = ?', [(int) $existing['id']]);
         } else {
@@ -759,9 +861,9 @@ function provider_save_services(int $providerId, array $list, bool $replace = tr
         }
         $seen[] = (string) $s['id'];
     }
-    $gone = q("DELETE FROM provider_services WHERE provider_id = ? AND source = 'whmcs' AND LOWER(status) IN ('cancelled', 'terminated', 'fraud')", [$providerId])->rowCount();
+    $gone = q("DELETE FROM provider_services WHERE provider_id = ? AND source = ? AND LOWER(status) IN ('cancelled', 'terminated', 'fraud')", [$providerId, $source])->rowCount();
     if ($replace) {
-        foreach (rows("SELECT id, remote_id FROM provider_services WHERE provider_id = ? AND source = 'whmcs'", [$providerId]) as $old) {
+        foreach (rows('SELECT id, remote_id FROM provider_services WHERE provider_id = ? AND source = ?', [$providerId, $source]) as $old) {
             if (!in_array((string) $old['remote_id'], $seen, true)) {
                 q('DELETE FROM provider_services WHERE id = ?', [(int) $old['id']]);
                 $gone++;
@@ -770,7 +872,7 @@ function provider_save_services(int $providerId, array $list, bool $replace = tr
     }
     $unmonitored = (int) val("SELECT COUNT(*) FROM provider_services WHERE provider_id = ? AND kind = 'vps' AND server_id IS NULL
                               AND (ip IS NOT NULL OR hostname IS NOT NULL) AND (status IS NULL OR LOWER(status) IN ('active', 'suspended'))", [$providerId]);
-    return ['count' => count($list), 'linked' => $linked, 'gone' => $gone, 'unmonitored' => $unmonitored];
+    return ['count' => count($list), 'linked' => $linked, 'gone' => $gone, 'unmonitored' => $unmonitored, 'logins' => $logins];
 }
 
 function service_monthly($amount, ?string $cycle): ?float
@@ -798,11 +900,16 @@ function service_to_server(int $serviceId): ?int
         db_update('provider_services', ['server_id' => (int) $existing], 'id = ?', [$serviceId]);
         return (int) $existing;
     }
+    $det = json_decode((string) ($s['details'] ?? ''), true) ?: [];
     $name = $s['hostname'] && $s['hostname'] !== $host ? $s['hostname'] : $s['name'];
     $id = db_insert('servers', [
         'name' => substr($name, 0, 100), 'provider_id' => $s['provider_id'], 'host' => strtolower($host), 'check_type' => 'auto',
-        'ssh_port' => 22, 'ssh_user' => 'root', 'expires_at' => $s['next_due'] ?: null,
+        'ssh_port' => 22, 'ssh_user' => $s['login_user'] ?: 'root', 'ssh_pass' => $s['login_pass'] ?: null,
+        'expires_at' => $s['next_due'] ?: null,
         'monthly_cost' => service_monthly($s['amount'], $s['cycle']), 'currency' => $s['currency'] ?: 'INR',
+        'location' => isset($det['location']) ? substr((string) $det['location'], 0, 100) : null,
+        'os' => isset($det['os']) ? substr((string) $det['os'], 0, 100) : null,
+        'specs' => isset($det['specs']) ? substr((string) $det['specs'], 0, 190) : null,
         'notes' => 'Added from ' . $s['name'] . ' (synced service)', 'enabled' => 1, 'status' => 'unknown',
         'status_since' => time(), 'created_at' => time(),
     ]);
@@ -810,6 +917,7 @@ function service_to_server(int $serviceId): ?int
     audit('server_added', $name . ' (' . $host . ') from synced service');
     return $id;
 }
+
 
 /** Cron helper: sync at most one provider per run, each roughly every 12 hours. */
 function provider_sync_due(): ?array

@@ -90,7 +90,7 @@ layout_start('Services & Licenses', 'services', 'Everything you pay for — sync
             data-search="<?= e(strtolower($s['name'] . ' ' . $s['ip'] . ' ' . $s['hostname'] . ' ' . $s['provider_name'] . ' ' . $s['server_name'])) ?>" class="<?= $dead ? 'row-dim' : '' ?>">
           <td>
             <span class="cell-title"><?= e($s['name']) ?></span>
-            <div class="cell-sub"><?= $s['source'] === 'whmcs' ? '<span class="pill pill-up xs">' . icon('refresh') . 'Synced</span>' : '<span class="pill pill-unknown xs">Manual</span>' ?>
+            <div class="cell-sub"><?= $s['source'] !== 'manual' ? '<span class="pill pill-up xs">' . icon('refresh') . 'Synced</span>' : '<span class="pill pill-unknown xs">Manual</span>' ?>
               <?= $s['hostname'] ? '<span class="mono">' . e($s['hostname']) . '</span>' : '' ?></div>
           </td>
           <td><span class="pill xs <?= $k[1] ?>"><?= $k[0] ?></span></td>

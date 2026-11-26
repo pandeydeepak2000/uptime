@@ -138,8 +138,8 @@ try {
             $hist[] = time();
             $_SESSION['sync_hist'] = $hist;
             @set_time_limit(180);
-            $res = provider_sync((int) ($_POST['id'] ?? 0));
-            json_out(['ok' => $res['ok'], 'message' => $res['message'], 'trace' => $res['trace']]);
+            $res = provider_sync((int) ($_POST['id'] ?? 0), substr((string) ($_POST['code'] ?? ''), 0, 10));
+            json_out(['ok' => $res['ok'], 'message' => $res['message'], 'trace' => $res['trace'], 'needs_2fa' => !empty($res['needs_2fa'])]);
 
         case 'service_monitor':
         case 'services_monitor_all':

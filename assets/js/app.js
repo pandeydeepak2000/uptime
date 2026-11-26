@@ -439,6 +439,13 @@
       seg.addEventListener('change', upd); upd();
     }
 
+    // provider integration picker (WHMCS / OVH)
+    var ap = $('[data-api-picker]');
+    if (ap) {
+      var updA = function () { var v = ($('input:checked', ap) || {}).value || 'whmcs'; $$('[data-api]').forEach(function (el) { el.hidden = el.getAttribute('data-api') !== v; }); };
+      ap.addEventListener('change', updA); updA();
+    }
+
     // check method picker
     var mp = $('[data-method-picker]');
     if (mp) {
@@ -493,10 +500,18 @@
     }
     if ((t = e.target.closest('[data-sync-provider]'))) {
       var box = t.closest('.sync-box');
-      setLoading(t, true);
-      toast('info', 'Syncing client area (read-only)… this can take up to a minute');
-      api('provider_sync', { id: t.getAttribute('data-sync-provider') }).then(function (j) {
-        setLoading(t, false);
+      var btn = t;
+      var run = function (code) {
+        setLoading(btn, true);
+        toast('info', 'Syncing (read-only)… this can take up to a minute');
+        api('provider_sync', { id: btn.getAttribute('data-sync-provider'), code: code || '' }).then(handle);
+      };
+      var handle = function (j) {
+        setLoading(btn, false);
+        if (j.needs_2fa) {
+          var c = window.prompt('This provider asks for a 2FA code.\nOpen your authenticator app and enter the current 6-digit code for this provider:');
+          if (c && /^\s*\d{6}\s*$/.test(c)) { run(c.trim()); return; }
+        }
         toast(j.ok ? 'success' : 'error', j.message || j.error);
         if (box) {
           box.className = 'sync-box ' + (j.ok ? 'ok' : 'bad');
@@ -508,7 +523,8 @@
           }
         }
         if (j.ok) setTimeout(function () { location.reload(); }, 2500);
-      });
+      };
+      run('');
       return;
     }
     if ((t = e.target.closest('[data-monitor-service]')) || (t = e.target.closest('[data-monitor-all]'))) {

@@ -83,7 +83,7 @@ function db_update(string $table, array $data, string $where, array $params = []
     return q($sql, array_merge(array_values($data), $params))->rowCount();
 }
 
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 
 /**
  * Upgrade an existing database in place (runs once per version bump).
@@ -125,10 +125,18 @@ function db_migrate(): void
             }
         }
     }
+    if ($v < 5) {
+        $addColumn('ALTER TABLE providers ADD COLUMN api_type VARCHAR(16) NULL');
+        $addColumn('ALTER TABLE providers ADD COLUMN api_config TEXT NULL');
+        $addColumn('ALTER TABLE providers ADD COLUMN totp_secret TEXT NULL');
+        $addColumn('ALTER TABLE provider_services ADD COLUMN login_user VARCHAR(64) NULL');
+        $addColumn('ALTER TABLE provider_services ADD COLUMN login_pass TEXT NULL');
+        $addColumn('ALTER TABLE provider_services ADD COLUMN details TEXT NULL');
+    }
     setting_set('db_version', DB_VERSION);
 }
 
-/** provider_services: synced (WHMCS) + manual services & licenses. */
+/** provider_services: synced (WHMCS / OVH) + manual services & licenses. */
 function db_services_schema(string $driver): array
 {
     $my = $driver !== 'sqlite';
@@ -152,6 +160,9 @@ function db_services_schema(string $driver): array
             `cycle` VARCHAR(32) NULL,
             `next_due` VARCHAR(10) NULL,
             `notes` TEXT NULL,
+            `login_user` VARCHAR(64) NULL,
+            `login_pass` TEXT NULL,
+            `details` TEXT NULL,
             `seen_at` INT NULL,
             `created_at` INT NOT NULL DEFAULT 0
         $end",
@@ -202,6 +213,9 @@ function db_schema(string $driver): array
             `last_sync_at` INT NULL,
             `last_sync_ok` INT NOT NULL DEFAULT 0,
             `last_sync_status` VARCHAR(255) NULL,
+            `api_type` VARCHAR(16) NULL,
+            `api_config` TEXT NULL,
+            `totp_secret` TEXT NULL,
             `created_at` INT NOT NULL DEFAULT 0
         $end",
         'servers' => "CREATE TABLE IF NOT EXISTS `servers` (
