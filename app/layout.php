@@ -82,6 +82,7 @@ function layout_start(string $title, string $active = '', string $subtitle = '',
     <?= nav_link('dashboard.php', 'grid', 'Dashboard', 'dashboard', $active, $downCount ? '<span class="nav-badge down">' . $downCount . '</span>' : '') ?>
     <?= nav_link('servers.php', 'server', 'Servers', 'servers', $active, '<span class="nav-badge">' . $total . '</span>') ?>
     <?= nav_link('providers.php', 'building', 'Providers', 'providers', $active) ?>
+    <?= nav_link('services.php', 'key', 'Services & Licenses', 'services', $active) ?>
     <?= nav_link('reports.php', 'report', 'Reports', 'reports', $active) ?>
     <div class="nav-label">System</div>
     <?= nav_link('settings.php', 'sliders', 'Settings', 'settings', $active) ?>

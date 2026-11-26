@@ -7,13 +7,18 @@ $providers = rows('SELECT p.*, COUNT(s.id) AS total,
                           SUM(CASE WHEN s.status = \'down\' AND s.enabled = 1 THEN 1 ELSE 0 END) AS down_count,
                           SUM(CASE WHEN s.enabled = 0 THEN 1 ELSE 0 END) AS paused_count
                    FROM providers p LEFT JOIN servers s ON s.provider_id = p.id
-                   GROUP BY p.id, p.name, p.website, p.panel_url, p.account_user, p.account_pass, p.support_email, p.color, p.notes, p.created_at
+                   GROUP BY p.id, p.name, p.website, p.panel_url, p.account_user, p.account_pass, p.support_email, p.color, p.notes, p.created_at,
+                            p.sync_enabled, p.last_sync_at, p.last_sync_ok, p.last_sync_status
                    ORDER BY p.name');
 $uptime = [];
 foreach (build_report(strtotime('today -29 days'), time())['servers'] as $r) {
     if ($r['provider_id'] && $r['uptime'] !== null && (int) $r['enabled'] === 1) {
         $uptime[(int) $r['provider_id']][] = $r['uptime'];
     }
+}
+$svcCount = [];
+foreach (rows('SELECT provider_id, COUNT(*) AS c FROM provider_services GROUP BY provider_id') as $c) {
+    $svcCount[(int) $c['provider_id']] = (int) $c['c'];
 }
 $cost = [];
 foreach (rows('SELECT provider_id, currency, SUM(monthly_cost) AS total FROM servers WHERE monthly_cost IS NOT NULL GROUP BY provider_id, currency') as $c) {
@@ -59,6 +64,15 @@ layout_start('Providers', 'providers', 'Hosting companies and their client-area 
         <dt>Support</dt><dd><?= $p['support_email'] ? '<span class="mono small">' . e($p['support_email']) . '</span>' : '—' ?></dd>
         <dt>Monthly</dt><dd><?= !empty($cost[$pid]) ? e(implode(' + ', $cost[$pid])) : '—' ?></dd>
       </dl>
+      <div class="sync-box <?= $p['last_sync_at'] ? ((int) $p['last_sync_ok'] ? 'ok' : 'bad') : '' ?>">
+        <div class="sync-head">
+          <span><?= icon('refresh') ?><b>Client-area sync</b> <?= (int) $p['sync_enabled'] ? '<span class="pill pill-up xs">Auto daily</span>' : '<span class="pill pill-unknown xs">Manual</span>' ?></span>
+          <span class="muted small"><?= (int) ($svcCount[$pid] ?? 0) ?> service(s)</span>
+        </div>
+        <p class="small sync-status"><?= $p['last_sync_at'] ? e((string) $p['last_sync_status']) . ' <span class="muted">· <span data-ago="' . (int) $p['last_sync_at'] . '">' . e(time_ago($p['last_sync_at'])) . '</span></span>' : '<span class="muted">Never synced. Works with WHMCS client areas (no CAPTCHA / 2FA).</span>' ?></p>
+        <div class="sync-trace" hidden></div>
+        <button class="btn btn-ghost sm" type="button" data-sync-provider="<?= $pid ?>" <?= $p['account_pass'] && $p['panel_url'] ? '' : 'disabled title="Save client area URL, username and password first"' ?>><?= icon('refresh') ?>Sync now</button>
+      </div>
       <div class="prov-foot">
         <a class="btn btn-ghost sm" href="<?= e(url('servers.php')) ?>"><?= icon('server') ?>Servers</a>
         <a class="btn btn-ghost sm" href="<?= e(url('server_edit.php?provider=' . $pid)) ?>"><?= icon('plus') ?>Add server</a>

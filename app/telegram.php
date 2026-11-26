@@ -210,15 +210,43 @@ function renewal_due_list(bool $all = false): array
         $left = (int) round(($ts - $today) / 86400);
         $match = $all ? ($left <= max($days) && ($left >= 0 || $overdue)) : (in_array($left, $days, true) || ($left < 0 && $overdue));
         if ($match) {
-            $out[] = $s + ['days_left' => $left];
+            $out[] = $s + ['days_left' => $left, 'kind' => 'server',
+                'cost_label' => $s['monthly_cost'] !== null ? (($s['currency'] ?: 'INR') . ' ' . number_format((float) $s['monthly_cost'], 2) . ' / month') : ''];
         }
     }
+    // licenses + services not tied to a monitored server (synced or manual)
+    foreach (rows("SELECT ps.*, p.name AS provider_name, p.panel_url, s.name AS server_name, s.host AS server_host
+                   FROM provider_services ps LEFT JOIN providers p ON p.id = ps.provider_id LEFT JOIN servers s ON s.id = ps.server_id
+                   WHERE ps.next_due IS NOT NULL AND ps.next_due <> '' AND (ps.kind = 'license' OR ps.server_id IS NULL)
+                     AND (ps.status IS NULL OR LOWER(ps.status) NOT IN ('cancelled', 'terminated', 'fraud'))") as $sv) {
+        $ts = strtotime($sv['next_due']);
+        if (!$ts) {
+            continue;
+        }
+        $left = (int) round(($ts - $today) / 86400);
+        $match = $all ? ($left <= max($days) && ($left >= 0 || $overdue)) : (in_array($left, $days, true) || ($left < 0 && $overdue));
+        if ($match) {
+            $out[] = [
+                'name'          => $sv['name'] . ($sv['server_name'] ? ' → ' . $sv['server_name'] : ''),
+                'host'          => $sv['ip'] ?: ($sv['hostname'] ?: ($sv['server_host'] ?: '—')),
+                'provider_name' => $sv['provider_name'],
+                'panel_url'     => $sv['panel_url'],
+                'monthly_cost'  => $sv['amount'],
+                'currency'      => $sv['currency'],
+                'expires_at'    => $sv['next_due'],
+                'days_left'     => $left,
+                'kind'          => $sv['kind'] === 'license' ? 'license' : 'service',
+                'cost_label'    => $sv['amount'] !== null ? (($sv['currency'] ?: 'INR') . ' ' . number_format((float) $sv['amount'], 2) . ($sv['cycle'] ? ' / ' . strtolower($sv['cycle']) : '')) : '',
+            ];
+        }
+    }
+    usort($out, fn ($a, $b) => strcmp($a['expires_at'], $b['expires_at']));
     return $out;
 }
 
 function renewal_text(array $list): string
 {
-    $t = "💳 <b>VPS renewal reminder</b>\n";
+    $t = "💳 <b>Renewal reminder — VPS &amp; licenses</b>\n";
     $totals = [];
     foreach ($list as $s) {
         $d = (int) $s['days_left'];
@@ -231,13 +259,14 @@ function renewal_text(array $list): string
         } else {
             $tag = ($d <= 3 ? '🟠' : '🟡') . " Due in <b>$d days</b>";
         }
-        $cost = $s['monthly_cost'] !== null ? (($s['currency'] ?: 'INR') . ' ' . number_format((float) $s['monthly_cost'], 2)) : '';
+        $cost = (string) ($s['cost_label'] ?? '');
         if ($s['monthly_cost'] !== null) {
             $cur = $s['currency'] ?: 'INR';
             $totals[$cur] = ($totals[$cur] ?? 0) + (float) $s['monthly_cost'];
         }
+        $icon = ['license' => '🔑 License: ', 'service' => '📦 '][$s['kind'] ?? 'server'] ?? '🖥 ';
         $t .= "\n" . $tag . ' — ' . e(date('d M Y', strtotime($s['expires_at']))) . "\n"
-            . '🖥 ' . tg_server_line($s) . "\n"
+            . $icon . tg_server_line($s) . "\n"
             . ($cost ? '💰 ' . e($cost) . "\n" : '')
             . (!empty($s['panel_url']) ? '🔗 <a href="' . e($s['panel_url']) . '">Renew in ' . e($s['provider_name'] ?: 'client area') . "</a>\n" : '');
     }

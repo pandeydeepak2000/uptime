@@ -83,7 +83,7 @@ function db_update(string $table, array $data, string $where, array $params = []
     return q($sql, array_merge(array_values($data), $params))->rowCount();
 }
 
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 
 /**
  * Upgrade an existing database in place (runs once per version bump).
@@ -109,7 +109,54 @@ function db_migrate(): void
     if ($v < 3) {
         $addColumn('ALTER TABLE servers ADD COLUMN ssh_fingerprint VARCHAR(120) NULL');
     }
+    if ($v < 4) {
+        $addColumn('ALTER TABLE providers ADD COLUMN sync_enabled INT NOT NULL DEFAULT 0');
+        $addColumn('ALTER TABLE providers ADD COLUMN last_sync_at INT NULL');
+        $addColumn('ALTER TABLE providers ADD COLUMN last_sync_ok INT NOT NULL DEFAULT 0');
+        $addColumn('ALTER TABLE providers ADD COLUMN last_sync_status VARCHAR(255) NULL');
+        $driver = (string) config('db.driver', 'mysql');
+        foreach (db_services_schema($driver) as $sql) {
+            try {
+                db()->exec($sql);
+            } catch (PDOException $e) {
+                if (stripos($e->getMessage(), 'already exists') === false && stripos($e->getMessage(), 'Duplicate key') === false) {
+                    throw $e;
+                }
+            }
+        }
+    }
     setting_set('db_version', DB_VERSION);
+}
+
+/** provider_services: synced (WHMCS) + manual services & licenses. */
+function db_services_schema(string $driver): array
+{
+    $my = $driver !== 'sqlite';
+    $id = $my ? 'INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY' : 'INTEGER PRIMARY KEY AUTOINCREMENT';
+    $end = $my ? ') ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci' : ')';
+    $idx = 'CREATE INDEX ' . ($my ? '' : 'IF NOT EXISTS ') . 'idx_services_provider ON provider_services (provider_id, remote_id)';
+    return [
+        "CREATE TABLE IF NOT EXISTS `provider_services` (
+            `id` $id,
+            `provider_id` INT NULL,
+            `server_id` INT NULL,
+            `source` VARCHAR(10) NOT NULL DEFAULT 'manual',
+            `remote_id` VARCHAR(32) NULL,
+            `name` VARCHAR(190) NOT NULL,
+            `kind` VARCHAR(16) NOT NULL DEFAULT 'other',
+            `hostname` VARCHAR(190) NULL,
+            `ip` VARCHAR(64) NULL,
+            `status` VARCHAR(32) NULL,
+            `amount` DECIMAL(10,2) NULL,
+            `currency` VARCHAR(8) NULL,
+            `cycle` VARCHAR(32) NULL,
+            `next_due` VARCHAR(10) NULL,
+            `notes` TEXT NULL,
+            `seen_at` INT NULL,
+            `created_at` INT NOT NULL DEFAULT 0
+        $end",
+        $idx,
+    ];
 }
 
 /**
@@ -151,6 +198,10 @@ function db_schema(string $driver): array
             `support_email` VARCHAR(190) NULL,
             `color` VARCHAR(16) NULL,
             `notes` TEXT NULL,
+            `sync_enabled` INT NOT NULL DEFAULT 0,
+            `last_sync_at` INT NULL,
+            `last_sync_ok` INT NOT NULL DEFAULT 0,
+            `last_sync_status` VARCHAR(255) NULL,
             `created_at` INT NOT NULL DEFAULT 0
         $end",
         'servers' => "CREATE TABLE IF NOT EXISTS `servers` (
@@ -223,5 +274,5 @@ function db_schema(string $driver): array
     if (!$my) {
         $indexes = array_map(fn ($s) => str_replace('CREATE INDEX', 'CREATE INDEX IF NOT EXISTS', $s), $indexes);
     }
-    return array_merge(array_values($tables), $indexes);
+    return array_merge(array_values($tables), $indexes, db_services_schema($driver));
 }

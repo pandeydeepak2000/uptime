@@ -42,6 +42,14 @@ try {
         $out[] = 'Daily report: ' . ($rep['ok'] ? 'sent' : 'failed — ' . $rep['error']);
     }
 
+    $sync = provider_sync_due();
+    if ($sync !== null) {
+        $out[] = 'Provider sync: ' . $sync['message'];
+        if (!$sync['ok'] && tg_enabled()) {
+            tg_send("⚠️ <b>Provider sync failed</b>\n" . e($sync['message']) . "\nOpen Providers in the dashboard to check." . tg_footer());
+        }
+    }
+
     $ren = tg_maybe_renewal_reminders();
     if ($ren !== null) {
         $out[] = 'Renewal reminders: ' . ($ren['count'] ? ($ren['ok'] ? 'sent for ' . $ren['count'] . ' server(s)' : 'failed — ' . $ren['error']) : 'none due');

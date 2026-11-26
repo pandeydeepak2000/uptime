@@ -483,6 +483,26 @@
       $$('[data-chart]').forEach(renderChart);
       return;
     }
+    if ((t = e.target.closest('[data-sync-provider]'))) {
+      var box = t.closest('.sync-box');
+      setLoading(t, true);
+      toast('info', 'Syncing client area (read-only)… this can take up to a minute');
+      api('provider_sync', { id: t.getAttribute('data-sync-provider') }).then(function (j) {
+        setLoading(t, false);
+        toast(j.ok ? 'success' : 'error', j.message || j.error);
+        if (box) {
+          box.className = 'sync-box ' + (j.ok ? 'ok' : 'bad');
+          var st = $('.sync-status', box); if (st) st.textContent = j.message || j.error || '';
+          var tr = $('.sync-trace', box);
+          if (tr && j.trace && j.trace.length) {
+            tr.hidden = false;
+            tr.innerHTML = '<details' + (j.ok ? '' : ' open') + '><summary class="muted small">Steps (safe to share — no password)</summary><code>' + j.trace.map(esc).join('<br>') + '</code></details>';
+          }
+        }
+        if (j.ok) setTimeout(function () { location.reload(); }, 2500);
+      });
+      return;
+    }
     if ((t = e.target.closest('[data-renewal-now]'))) {
       setLoading(t, true);
       api('renewal_now', {}).then(function (j) { setLoading(t, false); toast(j.ok ? 'success' : 'error', j.message || j.error); });

@@ -127,6 +127,20 @@ try {
                 . (!empty($ssh['ok']) ? 'read-only details fetched' : (!empty($ssh['skipped']) ? 'location only' : 'SSH: ' . $ssh['error'])));
             json_out(['ok' => true, 'geo' => $geo, 'ssh' => $ssh]);
 
+        case 'provider_sync':
+            if (!$isPost) {
+                json_out(['ok' => false], 405);
+            }
+            $hist = array_values(array_filter((array) ($_SESSION['sync_hist'] ?? []), fn ($t) => $t > time() - 3600));
+            if (count($hist) >= 6) {
+                json_out(['ok' => false, 'error' => 'Max 6 manual syncs per hour — please wait.'], 429);
+            }
+            $hist[] = time();
+            $_SESSION['sync_hist'] = $hist;
+            @set_time_limit(180);
+            $res = provider_sync((int) ($_POST['id'] ?? 0));
+            json_out(['ok' => $res['ok'], 'message' => $res['message'], 'trace' => $res['trace']]);
+
         case 'renewal_now':
             if (!$isPost) {
                 json_out(['ok' => false], 405);

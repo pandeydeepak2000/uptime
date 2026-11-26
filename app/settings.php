@@ -33,7 +33,7 @@ function settings_defaults(): array
         'last_cron_run'       => '0',
         'last_prune_date'     => '',
         'app_url'             => '',
-        'db_version'          => '3',
+        'db_version'          => '4',
     ];
 }
 

@@ -30,6 +30,12 @@ $expiring = array_values(array_filter($servers, function ($s) {
     $ts = strtotime($s['expires_at']);
     return $ts && $ts - time() < 15 * 86400;
 }));
+foreach (rows("SELECT ps.id, ps.name, ps.next_due AS expires_at, ps.kind, p.name AS provider_name FROM provider_services ps
+               LEFT JOIN providers p ON p.id = ps.provider_id
+               WHERE ps.next_due IS NOT NULL AND ps.next_due <> '' AND ps.next_due <= ? AND (ps.kind = 'license' OR ps.server_id IS NULL)
+                 AND (ps.status IS NULL OR LOWER(ps.status) NOT IN ('cancelled', 'terminated'))", [date('Y-m-d', strtotime('+15 days'))]) as $sv) {
+    $expiring[] = $sv + ['service' => true];
+}
 usort($expiring, fn ($a, $b) => strcmp($a['expires_at'], $b['expires_at']));
 
 $hour = (int) date('G');
@@ -231,8 +237,8 @@ layout_start(
       <?php else: ?>
         <div class="renew-list">
           <?php foreach ($expiring as $s): $daysLeft = (int) floor((strtotime($s['expires_at']) - strtotime('today')) / 86400); ?>
-            <a class="renew-row" href="<?= e(url('server.php?id=' . (int) $s['id'])) ?>">
-              <span><b><?= e($s['name']) ?></b><span class="muted small"> · <?= e($s['provider_name'] ?? '') ?></span></span>
+            <a class="renew-row" href="<?= e(url(!empty($s['service']) ? 'service_edit.php?id=' . (int) $s['id'] : 'server.php?id=' . (int) $s['id'])) ?>">
+              <span><?= !empty($s['service']) ? ($s['kind'] === 'license' ? '🔑 ' : '📦 ') : '' ?><b><?= e($s['name']) ?></b><span class="muted small"> · <?= e($s['provider_name'] ?? '') ?></span></span>
               <span class="pill <?= $daysLeft < 0 ? 'pill-down' : ($daysLeft <= 3 ? 'pill-warn' : 'pill-unknown') ?> xs"><?= $daysLeft < 0 ? 'Expired ' . abs($daysLeft) . 'd ago' : ($daysLeft === 0 ? 'Today' : $daysLeft . ' days') ?></span>
             </a>
           <?php endforeach; ?>

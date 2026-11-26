@@ -18,6 +18,7 @@ $periods = [
 ];
 $bars = uptime_days(90, $id)[$id] ?? [];
 $incidents = rows('SELECT * FROM incidents WHERE server_id = ? ORDER BY started_at DESC LIMIT 50', [$id]);
+$services = rows('SELECT ps.*, p.name AS provider_name FROM provider_services ps LEFT JOIN providers p ON p.id = ps.provider_id WHERE ps.server_id = ? ORDER BY ps.kind, ps.name', [$id]);
 
 // response-time chart: last 24h, bucketed to 5 minutes
 $raw = rows('SELECT checked_at, ok, response_ms FROM checks WHERE server_id = ? AND checked_at >= ? ORDER BY checked_at', [$id, $now - 86400]);
@@ -124,6 +125,30 @@ layout_start($s['name'], 'servers', '<span class="mono">' . e($s['host']) . '</s
     </dl>
     <?php if ($s['notes']): ?><div class="notes"><?= nl2br(e($s['notes'])) ?></div><?php endif; ?>
   </div>
+</section>
+
+<section class="card glass table-card anim-in" style="--d:.2s">
+  <div class="card-head"><h3><?= icon('key') ?>Licenses &amp; services on this server</h3>
+    <a class="btn btn-ghost xs" href="<?= e(url('service_edit.php?server=' . $id)) ?>"><?= icon('plus') ?>Add license</a></div>
+  <?php if (!$services): ?>
+    <div class="mini-empty"><?= icon('key') ?>No licenses linked. Add cPanel / LiteSpeed / CloudLinux licenses to get renewal reminders.</div>
+  <?php else: ?>
+  <div class="table-wrap"><table class="table">
+    <thead><tr><th>Name</th><th>Provider</th><th>Price</th><th>Next due</th><th>Status</th><th></th></tr></thead>
+    <tbody>
+    <?php foreach ($services as $sv): $l = $sv['next_due'] ? (int) round((strtotime($sv['next_due']) - strtotime('today')) / 86400) : null; ?>
+      <tr>
+        <td><b><?= e($sv['name']) ?></b> <span class="muted small"><?= $sv['kind'] === 'license' ? '🔑' : '' ?> <?= $sv['source'] === 'whmcs' ? 'synced' : 'manual' ?></span></td>
+        <td><?= e($sv['provider_name'] ?? '—') ?></td>
+        <td class="nowrap"><?= $sv['amount'] !== null ? e(($sv['currency'] ?? '') . ' ' . number_format((float) $sv['amount'], 2) . ' ' . strtolower((string) $sv['cycle'])) : '—' ?></td>
+        <td class="nowrap"><?= $sv['next_due'] ? e(date('d M Y', strtotime($sv['next_due']))) . ' <span class="pill xs ' . ($l < 0 ? 'pill-down' : ($l <= 3 ? 'pill-warn' : 'pill-unknown')) . '">' . ($l < 0 ? 'Overdue' : $l . 'd') . '</span>' : '—' ?></td>
+        <td><?= e($sv['status'] ?? '—') ?></td>
+        <td class="right"><a class="icon-btn sm" href="<?= e(url('service_edit.php?id=' . (int) $sv['id'])) ?>"><?= icon('edit') ?></a></td>
+      </tr>
+    <?php endforeach; ?>
+    </tbody>
+  </table></div>
+  <?php endif; ?>
 </section>
 
 <section class="card glass table-card anim-in" style="--d:.25s">

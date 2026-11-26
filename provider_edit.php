@@ -27,6 +27,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         'support_email' => post('support_email', '', 190) ?: null,
         'color'         => safe_color(post('color'), '#7c5cff'),
         'notes'         => post('notes', '', 3000) ?: null,
+        'sync_enabled'  => isset($_POST['sync_enabled']) ? 1 : 0,
     ];
     if ($d['name'] === '') {
         $errors[] = 'Provider name is required.';
@@ -86,6 +87,10 @@ layout_start($isEdit ? 'Edit provider' : 'Add provider', 'providers', 'Hosting c
     </div>
     <div class="field col-2"><label>Support email</label><input class="input" type="email" name="support_email" value="<?= $v('support_email') ?>"></div>
     <div class="field col-2"><label>Notes</label><textarea class="input" name="notes" rows="3"><?= $v('notes') ?></textarea></div>
+    <div class="col-2 sync-optin">
+      <label class="switch"><input type="checkbox" name="sync_enabled" <?= (int) ($p['sync_enabled'] ?? 0) ? 'checked' : '' ?>><span class="slider"></span><span><b>Auto-sync services daily</b> from this client area (WHMCS)</span></label>
+      <p class="muted small">Logs in with the login above, reads <b>My Services</b> (name, IP, status, price, next due date) and logs out. <b>Read-only</b> — it never orders, pays, cancels or changes anything. Stops automatically if the provider uses CAPTCHA or 2FA. Your provider may email you a “new login” notice each time.</p>
+    </div>
   </div>
   <div class="form-actions">
     <button class="btn btn-primary lg" type="submit"><?= icon('check') ?><?= $isEdit ? 'Save provider' : 'Add provider' ?></button>

@@ -13,6 +13,9 @@ Pure PHP 8 (no Composer, no build step) — just `git pull` on cPanel and it run
 - 🤖 **Telegram bot** — DOWN / RECOVERED alerts, “still down” reminders, daily report at your chosen time, login alerts
 - 🏢 **Providers** — add any provider, colour badges, panel URL + encrypted login, per-provider health & monthly cost
 - 📈 Response-time chart (24h), 90-day uptime bars, renewal reminders, activity/audit log
+- 🔄 **WHMCS client-area sync** (read-only) — pulls services, IPs, prices & next due dates from providers' client areas daily; stops on CAPTCHA/2FA
+- 🔑 **Services & Licenses** — track cPanel / LiteSpeed / CloudLinux licenses per server with Telegram renewal reminders
+- 🔍 **Auto-detect** location, OS & specs (read-only SSH + IP lookup) · 🌗 light/dark theme
 
 ## Install on cPanel
 
