@@ -12,10 +12,10 @@ ServerSignature Off
   # Block internal folders
   RewriteRule ^(app|storage)(/|$) - [F,L]
   # Block sensitive file types
-  RewriteRule \.(sqlite|sqlite3|db|log|md|lock|sql|ini|sh|bak|json|dist)$ - [F,L,NC]
+  RewriteRule \.(sqlite|sqlite3|db|log|md|lock|sql|ini|sh|bak|json|dist|zip|tar|gz|tgz|rar|7z)$ - [F,L,NC]
 </IfModule>
 
-<FilesMatch "(^\.|\.(sqlite|sqlite3|db|log|md|lock|sql|ini|sh|bak)$)">
+<FilesMatch "(^\.|\.(sqlite|sqlite3|db|log|md|lock|sql|ini|sh|bak|zip|tar|gz|tgz|rar|7z)$)">
   <IfModule mod_authz_core.c>
     Require all denied
   </IfModule>
