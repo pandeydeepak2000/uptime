@@ -66,20 +66,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     audit('password_change_failed', 'Wrong current password');
                     throw new InvalidArgumentException('Current password is incorrect.');
                 }
-                if ($err = password_strength_error($new)) {
-                    throw new InvalidArgumentException($err);
-                }
-                if ($new !== (string) ($_POST['new_password2'] ?? '')) {
-                    throw new InvalidArgumentException('New passwords do not match.');
+                $email = strtolower(post('email', '', 190));
+                if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                    throw new InvalidArgumentException('Enter a valid login email address.');
                 }
                 $newUser = post('username', $user['username'], 32);
                 if (!preg_match('/^[a-zA-Z0-9_.\-]{3,32}$/', $newUser)) {
-                    throw new InvalidArgumentException('Invalid username.');
+                    throw new InvalidArgumentException('Display name must be 3–32 characters (letters, numbers, _ . -).');
                 }
-                db_update('users', ['password_hash' => password_hash($new, password_algo()), 'username' => $newUser], 'id = ?', [$uid]);
+                $upd = ['username' => $newUser, 'email' => $email];
+                $changes = [];
+                if ($email !== strtolower((string) ($user['email'] ?? ''))) {
+                    $changes[] = 'login email';
+                }
+                if ($new !== '') {
+                    if ($err = password_strength_error($new)) {
+                        throw new InvalidArgumentException($err);
+                    }
+                    if ($new !== (string) ($_POST['new_password2'] ?? '')) {
+                        throw new InvalidArgumentException('New passwords do not match.');
+                    }
+                    $upd['password_hash'] = password_hash($new, password_algo());
+                    $changes[] = 'password';
+                }
+                db_update('users', $upd, 'id = ?', [$uid]);
                 session_regenerate_id(true);
-                audit('password_changed', 'Password changed');
-                flash('success', 'Credentials updated.');
+                audit($changes ? 'password_changed' : 'settings_updated', $changes ? 'Changed: ' . implode(', ', $changes) : 'Display name updated');
+                if ($changes && tg_enabled()) {
+                    tg_send("🛡 <b>Account security change</b>\nChanged: <b>" . e(implode(', ', $changes)) . "</b>\n🌐 IP: <code>" . e(client_ip()) . "</code>\n🕒 " . e(date('d M Y, h:i:s A')));
+                }
+                flash('success', $changes ? 'Updated: ' . implode(' & ', $changes) . '. Use your email to sign in from now on.' : 'Profile updated.');
                 $tab = 'security';
                 break;
 
@@ -257,10 +273,11 @@ layout_start('Settings', 'settings', 'Monitoring, Telegram alerts, security &amp
         <?= csrf_field() ?><input type="hidden" name="section" value="password">
         <div class="card-head"><h3><?= icon('lock') ?>Login credentials</h3></div>
         <div class="form-grid">
-          <div class="field col-2"><label>Username</label><input class="input" name="username" value="<?= e($u['username']) ?>" required></div>
-          <div class="field col-2"><label>Current password</label><input class="input" type="password" name="current_password" required autocomplete="current-password"></div>
-          <div class="field"><label>New password</label><input class="input" type="password" name="new_password" required autocomplete="new-password" data-strength></div>
-          <div class="field"><label>Confirm new password</label><input class="input" type="password" name="new_password2" required autocomplete="new-password"></div>
+          <div class="field"><label>Login email</label><input class="input" type="email" name="email" value="<?= e((string) ($u['email'] ?? '')) ?>" placeholder="you@company.com" required autocomplete="username"></div>
+          <div class="field"><label>Display name</label><input class="input" name="username" value="<?= e($u['username']) ?>" required></div>
+          <div class="field col-2"><label>Current password <span class="muted small">(required to save any change)</span></label><input class="input" type="password" name="current_password" required autocomplete="current-password"></div>
+          <div class="field"><label>New password <span class="muted small">(leave blank to keep)</span></label><input class="input" type="password" name="new_password" autocomplete="new-password" data-strength></div>
+          <div class="field"><label>Confirm new password</label><input class="input" type="password" name="new_password2" autocomplete="new-password"></div>
           <div class="col-2 strength"><div class="strength-bar"><i></i></div><span class="muted small" data-strength-label>Min 10 chars with upper, lower &amp; number</span></div>
         </div>
         <div class="form-actions"><button class="btn btn-primary" type="submit"><?= icon('check') ?>Update credentials</button></div>

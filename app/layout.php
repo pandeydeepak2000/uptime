@@ -104,6 +104,9 @@ function layout_start(string $title, string $active = '', string $subtitle = '',
     </div>
   </header>
   <div class="content">
+<?php if (empty($user['email'])): ?>
+    <a class="alert alert-error anim-in" href="<?= e(url('settings.php#security')) ?>"><?= icon('alert') ?><span><b>Set your login email.</b> You are still signing in with the username “<?= e($user['username']) ?>”. Add an email in Settings → Security — after that, only the email will work for login.</span></a>
+<?php endif; ?>
 <?php
 }
 

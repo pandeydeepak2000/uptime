@@ -33,24 +33,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif (post('website') !== '') {
         // honeypot field filled → bot
         record_attempt($ip, 'bot', false);
-        $error = 'Invalid username or password.';
+        $error = 'Invalid email or password.';
     } else {
-        $username = post('username', '', 64);
+        $username = strtolower(post('email', '', 190));
         $lock = login_lock_seconds($ip, $action === '2fa' ? '' : $username);
         if ($lock > 0) {
             $error = 'Too many failed attempts. Try again in ' . fmt_duration($lock) . '.';
         } elseif ($action === 'password') {
             $pw = (string) ($_POST['password'] ?? '');
-            $u = $username !== '' ? row('SELECT * FROM users WHERE username = ?', [$username]) : null;
+            $u = find_login_user($username);
             // always run password_verify to keep timing constant
             $hash = $u['password_hash'] ?? password_hash(random_token(8), password_algo());
             $ok = password_verify($pw, $hash) && $u;
             if (!$ok) {
                 record_attempt($ip, $username, false);
-                audit('login_failed', 'Username: ' . $username, null);
+                audit('login_failed', 'Login: ' . $username, null);
                 usleep(random_int(250000, 650000));
                 $left = LOGIN_MAX_IP_FAILS - (int) val('SELECT COUNT(*) FROM login_attempts WHERE ip = ? AND success = 0 AND attempted_at > ?', [$ip, time() - LOGIN_WINDOW]);
-                $error = 'Invalid username or password.' . ($left > 0 && $left <= 3 ? " $left attempt(s) left." : '');
+                $error = 'Invalid email or password.' . ($left > 0 && $left <= 3 ? " $left attempt(s) left." : '');
             } else {
                 if (password_needs_rehash($u['password_hash'], password_algo())) {
                     db_update('users', ['password_hash' => password_hash($pw, password_algo())], 'id = ?', [(int) $u['id']]);
@@ -121,8 +121,8 @@ auth_layout_start('Sign in');
         <input type="hidden" name="action" value="password">
         <div class="hp" aria-hidden="true"><input name="website" tabindex="-1" autocomplete="off"></div>
         <div class="field">
-          <label for="username">Username</label>
-          <div class="input-ico"><?= icon('user') ?><input class="input" id="username" name="username" value="<?= e($username) ?>" autocomplete="username" required autofocus></div>
+          <label for="email">Email address</label>
+          <div class="input-ico"><?= icon('user') ?><input class="input" id="email" name="email" type="text" inputmode="email" value="<?= e($username) ?>" placeholder="you@company.com" autocomplete="username" spellcheck="false" autocapitalize="off" required autofocus></div>
         </div>
         <div class="field">
           <label for="password">Password</label>

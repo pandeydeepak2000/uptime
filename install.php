@@ -34,7 +34,7 @@ $tzList = timezone_identifiers_list();
 $f = [
     'driver' => post('driver', 'mysql'), 'host' => post('host', 'localhost'), 'port' => post('port', '3306'),
     'name' => post('name'), 'user' => post('user'), 'app_name' => post('app_name', 'Uptime Command'),
-    'username' => post('username', 'admin'), 'timezone' => post('timezone', 'Asia/Kolkata'),
+    'email' => strtolower(post('email')), 'timezone' => post('timezone', 'Asia/Kolkata'),
 ];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -50,8 +50,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($f['driver'] === 'mysql' && ($f['name'] === '' || $f['user'] === '')) {
         $errors[] = 'Database name and user are required for MySQL.';
     }
-    if (!preg_match('/^[a-zA-Z0-9_.\-]{3,32}$/', $f['username'])) {
-        $errors[] = 'Username must be 3–32 characters (letters, numbers, _ . -).';
+    if (!filter_var($f['email'], FILTER_VALIDATE_EMAIL)) {
+        $errors[] = 'Enter a valid admin email address (used to log in).';
     }
     if ($err = password_strength_error($pw)) {
         $errors[] = $err;
@@ -95,8 +95,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'debug'                => false,
             ];
             $now = time();
-            $st = $pdo->prepare('INSERT INTO users (username, password_hash, totp_enabled, created_at) VALUES (?, ?, 0, ?)');
-            $st->execute([$f['username'], password_hash($pw, password_algo()), $now]);
+            $display = substr(preg_replace('/[^a-zA-Z0-9_.\-]/', '', explode('@', $f['email'])[0]), 0, 32) ?: 'admin';
+            $st = $pdo->prepare('INSERT INTO users (username, email, password_hash, totp_enabled, created_at) VALUES (?, ?, ?, 0, ?)');
+            $st->execute([$display, $f['email'], password_hash($pw, password_algo()), $now]);
 
             $defaults = settings_defaults();
             $defaults['app_name'] = $f['app_name'] !== '' ? substr($f['app_name'], 0, 60) : 'Uptime Command';
@@ -172,7 +173,7 @@ auth_layout_start('Install');
         <div class="field"><label>Timezone</label>
           <select class="input" name="timezone"><?php foreach ($tzList as $tz): ?><option <?= $tz === $f['timezone'] ? 'selected' : '' ?>><?= e($tz) ?></option><?php endforeach; ?></select>
         </div>
-        <div class="field col-2"><label>Admin username</label><input class="input" name="username" value="<?= e($f['username']) ?>" required></div>
+        <div class="field col-2"><label>Admin email (used to log in)</label><input class="input" type="email" name="email" value="<?= e($f['email']) ?>" placeholder="you@company.com" autocomplete="username" required></div>
         <div class="field"><label>Password</label><input class="input" type="password" name="password" autocomplete="new-password" required data-strength></div>
         <div class="field"><label>Confirm password</label><input class="input" type="password" name="password2" autocomplete="new-password" required></div>
         <div class="col-2 strength"><div class="strength-bar"><i></i></div><span class="muted small" data-strength-label>Min 10 chars with upper, lower & number</span></div>

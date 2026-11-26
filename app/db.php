@@ -83,6 +83,29 @@ function db_update(string $table, array $data, string $where, array $params = []
     return q($sql, array_merge(array_values($data), $params))->rowCount();
 }
 
+const DB_VERSION = 2;
+
+/**
+ * Upgrade an existing database in place (runs once per version bump).
+ */
+function db_migrate(): void
+{
+    $v = (int) setting('db_version', 1);
+    if ($v >= DB_VERSION) {
+        return;
+    }
+    if ($v < 2) {
+        try {
+            db()->exec('ALTER TABLE users ADD COLUMN email VARCHAR(190) NULL');
+        } catch (PDOException $e) {
+            if (stripos($e->getMessage(), 'duplicate') === false) {
+                throw $e;
+            }
+        }
+    }
+    setting_set('db_version', DB_VERSION);
+}
+
 /**
  * Schema for a fresh install. Returns a list of SQL statements.
  */
@@ -97,6 +120,7 @@ function db_schema(string $driver): array
         'users' => "CREATE TABLE IF NOT EXISTS `users` (
             `id` $id,
             `username` VARCHAR(64) NOT NULL UNIQUE,
+            `email` VARCHAR(190) NULL,
             `password_hash` VARCHAR(255) NOT NULL,
             `totp_secret` TEXT NULL,
             `totp_enabled` INT NOT NULL DEFAULT 0,

@@ -92,7 +92,7 @@ function auth_user(): ?array
         logout_user();
         return $cache = null;
     }
-    $u = row('SELECT id, username, totp_enabled, last_login_at, last_login_ip FROM users WHERE id = ?', [$uid]);
+    $u = row('SELECT id, username, email, totp_enabled, last_login_at, last_login_ip FROM users WHERE id = ?', [$uid]);
     if (!$u) {
         logout_user();
         return $cache = null;
@@ -163,6 +163,7 @@ function login_lock_seconds(string $ip, string $username = ''): int
         return max(1, (int) $r['last'] + LOGIN_WINDOW - time());
     }
     if ($username !== '') {
+        $username = substr($username, 0, 64);
         $r = row('SELECT COUNT(*) AS c, MAX(attempted_at) AS last FROM login_attempts WHERE username = ? AND success = 0 AND attempted_at > ?', [$username, $since]);
         if ($r && (int) $r['c'] >= LOGIN_MAX_USER_FAILS) {
             return max(1, (int) $r['last'] + LOGIN_WINDOW - time());
@@ -220,6 +221,22 @@ function ip_in_cidr(string $ip, string $cidr): bool
     }
     $mask = chr((0xff << (8 - $rem)) & 0xff);
     return (($ipBin[$bytes] & $mask) === ($netBin[$bytes] & $mask));
+}
+
+/**
+ * Find the account for a login identifier.
+ * Email is the login. Username works only while no email has been set (upgrade path).
+ */
+function find_login_user(string $login): ?array
+{
+    $login = trim($login);
+    if ($login === '') {
+        return null;
+    }
+    if (strpos($login, '@') !== false) {
+        return row('SELECT * FROM users WHERE LOWER(email) = ?', [strtolower($login)]);
+    }
+    return row("SELECT * FROM users WHERE username = ? AND (email IS NULL OR email = '')", [$login]);
 }
 
 function verify_current_password(int $uid, string $pw): bool

@@ -43,6 +43,7 @@ if (!defined('SKIP_CONFIG')) {
         if ($tz !== '' && in_array($tz, timezone_identifiers_list(), true)) {
             date_default_timezone_set($tz);
         }
+        db_migrate();
     } catch (Throwable $e) {
         if (PHP_SAPI !== 'cli') {
             http_response_code(500);
