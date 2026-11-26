@@ -9,6 +9,11 @@ $list = rows('SELECT ps.*, p.name AS provider_name, p.color AS provider_color, p
               ORDER BY CASE WHEN ps.next_due IS NULL OR ps.next_due = \'\' THEN 1 ELSE 0 END, ps.next_due, ps.name');
 $providers = rows('SELECT id, name FROM providers ORDER BY name');
 $today = strtotime('today');
+$states = [];
+foreach ($list as $s) {
+    $k = service_state($s['status']);
+    $states[$k] = ($states[$k] ?? 0) + 1;
+}
 $counts = ['all' => count($list), 'license' => 0, 'vps' => 0, 'other' => 0, 'due7' => 0];
 $spend = [];
 foreach ($list as $s) {
@@ -59,6 +64,13 @@ layout_start('Services & Licenses', 'services', 'Everything you pay for — sync
     <button class="chip" data-status="vps" type="button">🖥 VPS <b><?= $counts['vps'] ?></b></button>
     <button class="chip" data-status="other" type="button">📦 Other <b><?= $counts['other'] ?></b></button>
   </div>
+  <div class="chips" data-filter-chips="#svcTable" data-filter-key="state">
+    <button class="chip active" data-status="all" type="button">Any status</button>
+    <button class="chip" data-status="active" type="button"><span class="dot dot-up"></span>Active <b><?= $states['active'] ?? 0 ?></b></button>
+    <button class="chip" data-status="suspended" type="button"><span class="dot dot-warn"></span>Suspended <b><?= $states['suspended'] ?? 0 ?></b></button>
+    <?php if (!empty($states['pending'])): ?><button class="chip" data-status="pending" type="button">Pending <b><?= $states['pending'] ?></b></button><?php endif; ?>
+    <?php if (!empty($states['ended'])): ?><button class="chip" data-status="ended" type="button">Cancelled <b><?= $states['ended'] ?></b></button><?php endif; ?>
+  </div>
   <select class="input select-sm" data-filter-provider="#svcTable">
     <option value="">All providers</option>
     <?php foreach ($providers as $p): ?><option value="<?= (int) $p['id'] ?>"><?= e($p['name']) ?></option><?php endforeach; ?>
@@ -74,7 +86,7 @@ layout_start('Services & Licenses', 'services', 'Everything you pay for — sync
           $left = $s['next_due'] ? (int) round((strtotime($s['next_due']) - $today) / 86400) : null;
           $dead = in_array(strtolower((string) $s['status']), ['cancelled', 'terminated'], true);
           ?>
-        <tr data-status="<?= e($s['kind']) ?>" data-provider="<?= (int) $s['provider_id'] ?>"
+        <tr data-status="<?= e($s['kind']) ?>" data-state="<?= e(service_state($s['status'])) ?>" data-provider="<?= (int) $s['provider_id'] ?>"
             data-search="<?= e(strtolower($s['name'] . ' ' . $s['ip'] . ' ' . $s['hostname'] . ' ' . $s['provider_name'] . ' ' . $s['server_name'])) ?>" class="<?= $dead ? 'row-dim' : '' ?>">
           <td>
             <span class="cell-title"><?= e($s['name']) ?></span>

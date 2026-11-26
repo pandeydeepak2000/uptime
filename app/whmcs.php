@@ -278,6 +278,35 @@ class WhmcsClient
     public function services(): array
     {
         $r = $this->req($this->base . 'clientarea.php?action=services');
+
+        // 1) The services LIST has labelled columns (Product · Pricing · Next Due Date · Status) —
+        //    the most reliable source for name, price, due date and status.
+        $listed = self::parseServicesList($r['body']);
+        if ($listed) {
+            $live = array_values(array_filter($listed, fn ($s) => !service_is_ended($s['status'])));
+            $this->step('Services found: ' . count($listed) . ' (' . (count($listed) - count($live)) . ' cancelled/terminated skipped)');
+            $out = [];
+            foreach ($live as $s) {
+                usleep(300000); // be polite to the provider
+                // 2) the details page is only used for IP / hostname (and anything the list lacked)
+                $d = $this->serviceDetails((string) $s['id'], []);
+                $generic = fn ($n) => $n === '' || preg_match('~^(service #\d+|details|overview|product details|manage|information)$~i', trim($n));
+                $out[] = [
+                    'id'           => $s['id'],
+                    'name'         => !$generic($s['name']) ? $s['name'] : $d['name'],
+                    'hostname'     => $s['hostname'] ?: $d['hostname'],
+                    'ip'           => $d['ip'] ?: $s['ip'],
+                    'status'       => $s['status'] ?: $d['status'],
+                    'amount'       => $s['amount'] ?? $d['amount'],
+                    'currency'     => $s['currency'] ?: $d['currency'],
+                    'cycle'        => $s['cycle'] ?: $d['cycle'],
+                    'next_due_raw' => $s['next_due_raw'] ?: $d['next_due_raw'],
+                ];
+            }
+            return $out;
+        }
+
+        // Fallback for themes without a services table
         $x = self::dom(preg_replace('~<br\s*/?>~i', ' ', $r['body']));
         $ids = [];
         $rowText = [];
@@ -299,11 +328,14 @@ class WhmcsClient
                 }
             }
         }
-        $this->step('Services found: ' . count($ids));
+        $this->step('Services found: ' . count($ids) . ' (no services table — reading each details page)');
         $out = [];
         foreach (array_keys($ids) as $id) {
             usleep(300000); // be polite to the provider
-            $out[] = $this->serviceDetails((string) $id, $rowText[$id] ?? []);
+            $d = $this->serviceDetails((string) $id, $rowText[$id] ?? []);
+            if (!service_is_ended($d['status'])) {
+                $out[] = $d;
+            }
         }
         return $out;
     }
@@ -430,7 +462,7 @@ class WhmcsClient
             [$amount, $currency] = whmcs_parse_money($priceText);
             $host = '';
             foreach (array_slice($nameLines, 1) as $l) {
-                if (valid_host(strtolower($l))) {
+                if (strpos($l, ".") !== false && valid_host(strtolower($l))) {
                     $host = strtolower($l);
                     break;
                 }
@@ -459,10 +491,12 @@ class WhmcsClient
 
         $name = '';
         foreach (['//*[contains(@class,"product-name")]', '//*[contains(@class,"product-details")]//h3', '//*[contains(@class,"product-details")]//h4', '//h3[contains(@class,"product")]'] as $q) {
-            $n = $x->query($q);
-            if ($n && $n->length && trim($n->item(0)->textContent) !== '') {
-                $name = trim(preg_replace('/\s+/', ' ', $n->item(0)->textContent));
-                break;
+            foreach ($x->query($q) ?: [] as $node) {
+                $t = trim(preg_replace('/\s+/', ' ', $node->textContent));
+                if ($t !== '' && !preg_match('~^(details|overview|product details|manage|information|billing overview|addons)$~i', $t)) {
+                    $name = $t;
+                    break 2;
+                }
             }
         }
         if ($name === '' && $row) {
@@ -508,7 +542,7 @@ class WhmcsClient
         return [
             'id'           => $id,
             'name'         => substr($name !== '' ? $name : 'Service #' . $id, 0, 190),
-            'hostname'     => substr(valid_host(strtolower($hostname)) ? strtolower($hostname) : '', 0, 190),
+            'hostname'     => substr(strpos($hostname, '.') !== false && valid_host(strtolower($hostname)) ? strtolower($hostname) : '', 0, 190),
             'ip'           => $ip,
             'status'       => substr(ucfirst(strtolower(trim($status))), 0, 32),
             'amount'       => $amount,
@@ -568,6 +602,21 @@ function whmcs_parse_date(string $raw, string $order = 'dmy'): ?string
     }
     $ts = strtotime($raw);
     return $ts ? date('Y-m-d', $ts) : null;
+}
+
+function service_is_ended(?string $status): bool
+{
+    return in_array(strtolower(trim((string) $status)), ['cancelled', 'canceled', 'terminated', 'fraud'], true);
+}
+
+/** active | suspended | pending | ended | other — used by the status filter */
+function service_state(?string $status): string
+{
+    if (service_is_ended($status)) {
+        return 'ended';
+    }
+    $s = strtolower(trim((string) $status));
+    return $s === '' ? 'active' : (in_array($s, ['active', 'suspended', 'pending'], true) ? $s : 'other');
 }
 
 function service_kind(string $name): string
@@ -658,6 +707,9 @@ function provider_save_services(int $providerId, array $list, bool $replace = tr
     $seen = [];
     $linked = 0;
     foreach ($list as $s) {
+        if (service_is_ended($s['status'])) {
+            continue; // cancelled / terminated services are not kept
+        }
         $due = whmcs_parse_date($s['next_due_raw'], $order);
         $existing = row("SELECT id, kind, server_id, ip, hostname FROM provider_services WHERE provider_id = ? AND source = 'whmcs' AND remote_id = ?", [$providerId, $s['id']]);
         $kind = $existing ? $existing['kind'] : service_kind($s['name'] . ' ' . $s['hostname']);
@@ -707,7 +759,7 @@ function provider_save_services(int $providerId, array $list, bool $replace = tr
         }
         $seen[] = (string) $s['id'];
     }
-    $gone = 0;
+    $gone = q("DELETE FROM provider_services WHERE provider_id = ? AND source = 'whmcs' AND LOWER(status) IN ('cancelled', 'terminated', 'fraud')", [$providerId])->rowCount();
     if ($replace) {
         foreach (rows("SELECT id, remote_id FROM provider_services WHERE provider_id = ? AND source = 'whmcs'", [$providerId]) as $old) {
             if (!in_array((string) $old['remote_id'], $seen, true)) {

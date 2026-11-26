@@ -122,24 +122,32 @@
     var targets = {};
     $$('[data-filter-input],[data-filter-chips],[data-filter-provider]').forEach(function (el) {
       var sel = el.getAttribute('data-filter-input') || el.getAttribute('data-filter-chips') || el.getAttribute('data-filter-provider');
-      targets[sel] = targets[sel] || { q: '', status: 'all', provider: '' };
+      targets[sel] = targets[sel] || { q: '', chips: {}, provider: '' };
       var st = targets[sel];
       if (el.hasAttribute('data-filter-input')) el.addEventListener('input', function () { st.q = el.value.toLowerCase().trim(); apply(sel); });
       if (el.hasAttribute('data-filter-provider')) el.addEventListener('change', function () { st.provider = el.value; apply(sel); });
       if (el.hasAttribute('data-filter-chips')) {
+        // each chip group filters one row attribute (default data-status); several groups can combine
+        var key = el.getAttribute('data-filter-key') || 'status';
+        var first = $('.chip.active', el);
+        st.chips[key] = first ? first.getAttribute('data-status') : 'all';
         el.addEventListener('click', function (e) {
           var c = e.target.closest('.chip'); if (!c) return;
           $$('.chip', el).forEach(function (x) { x.classList.remove('active'); });
-          c.classList.add('active'); st.status = c.getAttribute('data-status'); apply(sel);
+          c.classList.add('active'); st.chips[key] = c.getAttribute('data-status'); apply(sel);
         });
       }
     });
+    Object.keys(targets).forEach(apply);
     function apply(sel) {
       var root = $(sel); if (!root) return;
       var st = targets[sel], shown = 0;
       $$('[data-search]', root).forEach(function (it) {
-        var ok = (!st.q || it.getAttribute('data-search').indexOf(st.q) !== -1)
-          && (st.status === 'all' || it.getAttribute('data-status') === st.status)
+        var chipsOk = Object.keys(st.chips).every(function (k) {
+          var want = st.chips[k], have = it.getAttribute('data-' + k) || '';
+          return want === 'all' || have === want || (want.indexOf('|') !== -1 && want.split('|').indexOf(have) !== -1);
+        });
+        var ok = (!st.q || it.getAttribute('data-search').indexOf(st.q) !== -1) && chipsOk
           && (!st.provider || it.getAttribute('data-provider') === st.provider);
         it.hidden = !ok; if (ok) shown++;
       });
