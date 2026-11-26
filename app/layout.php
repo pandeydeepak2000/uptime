@@ -14,12 +14,13 @@ function asset(string $path): string
 
 function html_head(string $title, string $bodyClass): void
 {
-    $u = auth_user_cached();
+    $theme = current_theme();
     ?><!doctype html>
-<html lang="en">
+<html lang="en" data-theme="<?= $theme ?>">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="<?= $theme === 'light' ? '#f4f7fc' : '#05070f' ?>">
 <meta name="robots" content="noindex, nofollow">
 <meta name="csrf-token" content="<?= e(csrf_token()) ?>">
 <meta name="server-time" content="<?= time() ?>">
@@ -34,6 +35,18 @@ function html_head(string $title, string $bodyClass): void
 <body class="<?= e($bodyClass) ?>">
 <div class="bg-fx" aria-hidden="true"><span class="orb o1"></span><span class="orb o2"></span><span class="orb o3"></span><div class="grid-fx"></div></div>
 <?php
+}
+
+/** 'dark' (default) or 'light' — remembered in a cookie so the page renders without a flash. */
+function current_theme(): string
+{
+    return (($_COOKIE['uptime_theme'] ?? '') === 'light') ? 'light' : 'dark';
+}
+
+function theme_toggle(string $extra = ''): string
+{
+    return '<button class="icon-btn theme-toggle ' . e($extra) . '" type="button" data-theme-toggle title="Switch light / dark mode" aria-label="Switch light / dark mode">'
+        . icon('sun', 'ico-sun') . icon('moon', 'ico-moon') . '</button>';
 }
 
 function auth_user_cached(): ?array
@@ -98,6 +111,7 @@ function layout_start(string $title, string $active = '', string $subtitle = '',
       <?php if ($subtitle): ?><p><?= $subtitle ?></p><?php endif; ?>
     </div>
     <div class="topbar-actions">
+      <?= theme_toggle() ?>
       <div class="live-clock hide-sm"><?= icon('clock') ?><span id="liveClock"><?= e(date('h:i:s A')) ?></span></div>
       <?= $actions ?>
       <button class="btn btn-primary" id="btnCheckAll" type="button"><?= icon('refresh') ?><span class="hide-sm">Check all now</span></button>
@@ -149,6 +163,7 @@ function auth_layout_start(string $title): void
 {
     security_headers();
     html_head($title, 'auth-body');
+    echo theme_toggle('auth-theme');
 }
 
 function auth_layout_end(): void

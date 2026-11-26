@@ -472,6 +472,17 @@
       });
       return;
     }
+    if ((t = e.target.closest('[data-theme-toggle]'))) {
+      var root = document.documentElement;
+      var next = root.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+      root.classList.add('theme-anim');
+      root.setAttribute('data-theme', next);
+      var tc = $('meta[name="theme-color"]'); if (tc) tc.content = next === 'light' ? '#f4f7fc' : '#05070f';
+      document.cookie = 'uptime_theme=' + next + '; path=' + BASE + '; max-age=31536000; SameSite=Lax' + (location.protocol === 'https:' ? '; Secure' : '');
+      setTimeout(function () { root.classList.remove('theme-anim'); }, 450);
+      $$('[data-chart]').forEach(renderChart);
+      return;
+    }
     if ((t = e.target.closest('[data-renewal-now]'))) {
       setLoading(t, true);
       api('renewal_now', {}).then(function (j) { setLoading(t, false); toast(j.ok ? 'success' : 'error', j.message || j.error); });
