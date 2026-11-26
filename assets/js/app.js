@@ -253,6 +253,60 @@
     document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !m.hidden) closeReveal(); });
   }
 
+  /* ---------- server auto-discovery (read-only) ---------- */
+  function runDiscover(btn, trustNew) {
+    var box = btn.closest('[data-discover]'), form = box.closest('form'), el = form.elements;
+    var res = $('.discover-result', box), host = el.host.value.trim();
+    if (!host) { toast('error', 'Enter the IP address / hostname first'); el.host.focus(); return; }
+    var runBtn = $('[data-discover-run]', box);
+    setLoading(runBtn, true);
+    res.hidden = false;
+    res.innerHTML = '<div class="dr-loading"><span class="spinner"></span>Connecting to ' + esc(host) + ' (read-only)…</div>';
+    var line = function (k, label, val) { return '<div class="dr-row dr-' + k + '"><b>' + esc(label) + '</b><span>' + esc(val) + '</span></div>'; };
+    var fill = function (name, v) {
+      if (!v || !el[name]) return;
+      el[name].value = v;
+      el[name].classList.remove('filled'); void el[name].offsetWidth; el[name].classList.add('filled');
+    };
+    api('discover', {
+      host: host, ssh_port: el.ssh_port.value, ssh_user: el.ssh_user.value, ssh_pass: el.ssh_pass.value,
+      server_id: box.getAttribute('data-server-id') || 0,
+      known_fp: el.ssh_fingerprint.value || box.getAttribute('data-known-fp') || '',
+      trust_new: trustNew ? '1' : ''
+    }).then(function (j) {
+      setLoading(runBtn, false);
+      if (!j.ok) { res.innerHTML = line('bad', 'Error', j.error || 'Failed'); return; }
+      var g = j.geo || {}, s = j.ssh || {}, out = [];
+      if (g.ok) { fill('location', g.location); out.push(line('ok', 'Location', g.location + (g.network ? ' · ' + g.network : ''))); }
+      else out.push(line('warn', 'Location', g.error || 'Not found'));
+      if (s.ok) {
+        fill('os', s.os); fill('specs', s.specs);
+        el.ssh_fingerprint.value = s.fingerprint; box.setAttribute('data-known-fp', s.fingerprint);
+        out.push(line('ok', 'OS', s.os || '—'));
+        out.push(line('ok', 'Specs', (s.specs || '—') + (s.disk_used != null ? ' · ' + s.disk_used + '% disk used' : '')));
+        var extra = [];
+        if (s.hostname) extra.push('Hostname: ' + s.hostname);
+        if (s.virt) extra.push('Virtualization: ' + s.virt);
+        if (s.panel) extra.push('Panel: ' + s.panel);
+        if (s.cpu_model) extra.push('CPU: ' + s.cpu_model);
+        if (s.kernel) extra.push('Kernel: ' + s.kernel + (s.arch ? ' (' + s.arch + ')' : ''));
+        if (g.network) extra.push('Network: ' + g.network);
+        if (s.uptime) out.push(line('info', 'Server uptime', s.uptime));
+        extra.forEach(function (x) { var p = x.split(': '); out.push(line('info', p.shift(), p.join(': '))); });
+        if (el.notes && !el.notes.value.trim() && extra.length) fill('notes', extra.join('\n'));
+        out.push(line('info', 'Host key', s.fingerprint + ' (saved on Save)'));
+        toast('success', 'Server details detected — review and Save');
+      } else if (s.fp_mismatch) {
+        out.push(line('bad', 'SSH', s.error));
+        out.push('<div class="dr-row dr-bad"><b>New key</b><span class="mono">' + esc(s.fingerprint) + '</span></div>' +
+          '<button class="btn btn-danger sm" type="button" data-discover-trust>Server was reinstalled — trust new key &amp; retry</button>');
+      } else {
+        out.push(line(s.skipped ? 'warn' : 'bad', 'SSH', s.error || 'Failed'));
+      }
+      res.innerHTML = out.join('');
+    });
+  }
+
   /* ---------- tabs ---------- */
   function initTabs() {
     var nav = $('[data-tabs]'); if (!nav) return;
@@ -399,6 +453,11 @@
     if ((t = e.target.closest('[data-check]'))) { e.preventDefault(); runCheck(t, t.getAttribute('data-check')); return; }
     if ((t = e.target.closest('[data-reveal]'))) { openReveal(t.getAttribute('data-reveal'), t.getAttribute('data-id'), t.getAttribute('data-label') || 'this item'); return; }
     if ((t = e.target.closest('[data-print]'))) { window.print(); return; }
+    if ((t = e.target.closest('[data-discover-run]'))) { runDiscover(t, false); return; }
+    if ((t = e.target.closest('[data-discover-trust]'))) {
+      if (window.confirm('Only continue if you KNOW this server was reinstalled or its SSH key was regenerated. Trust the new host key?')) runDiscover(t, true);
+      return;
+    }
     if ((t = e.target.closest('[data-toggle-pw]'))) {
       var inp = $(t.getAttribute('data-toggle-pw'));
       if (inp) { inp.type = inp.type === 'password' ? 'text' : 'password'; t.style.color = inp.type === 'text' ? '#22d3ee' : ''; }

@@ -1,0 +1,5 @@
+{"config":{"platform":{"php":"8.0.30"},"optimize-autoloader":true},
+    "require": {
+        "phpseclib/phpseclib": "^3.0"
+    }
+}

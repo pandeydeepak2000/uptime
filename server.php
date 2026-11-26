@@ -87,6 +87,7 @@ layout_start($s['name'], 'servers', '<span class="mono">' . e($s['host']) . '</s
       <dt>Host / IP</dt><dd><span class="mono"><?= e($s['host']) ?></span><button class="copy-btn" type="button" data-copy="<?= e($s['host']) ?>"><?= icon('copy') ?></button></dd>
       <dt>SSH user</dt><dd><span class="mono"><?= e($s['ssh_user'] ?: 'root') ?></span><button class="copy-btn" type="button" data-copy="<?= e($s['ssh_user'] ?: 'root') ?>"><?= icon('copy') ?></button></dd>
       <dt>SSH port</dt><dd class="mono"><?= (int) $s['ssh_port'] ?></dd>
+      <dt>Host key</dt><dd><?= $s['ssh_fingerprint'] ? '<span class="mono small" title="Saved SSH host key fingerprint — auto-detect refuses to send the password if it changes">' . e($s['ssh_fingerprint']) . '</span>' : '<span class="muted small">Not verified yet — run Auto-detect in Edit</span>' ?></dd>
       <dt>Password</dt><dd><?php if ($s['ssh_pass']): ?><span class="mono">••••••••••••</span>
         <button class="btn btn-ghost xs" type="button" data-reveal="server" data-id="<?= $id ?>" data-label="<?= e($s['name']) ?>"><?= icon('eye') ?>Reveal</button><?php else: ?><span class="muted">Not saved</span><?php endif; ?></dd>
     </dl>

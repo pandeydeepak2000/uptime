@@ -83,6 +83,50 @@ try {
             audit('secret_revealed', 'Viewed password for ' . $label);
             json_out(['ok' => true, 'value' => $val, 'empty' => $val === '']);
 
+        case 'discover':
+            if (!$isPost) {
+                json_out(['ok' => false], 405);
+            }
+            // throttle: max 12 discoveries per 10 minutes per session
+            $hist = array_values(array_filter((array) ($_SESSION['discover_hist'] ?? []), fn ($t) => $t > time() - 600));
+            if (count($hist) >= 12) {
+                json_out(['ok' => false, 'error' => 'Too many auto-detect requests. Wait a few minutes.'], 429);
+            }
+            $hist[] = time();
+            $_SESSION['discover_hist'] = $hist;
+
+            $host = strtolower(trim((string) ($_POST['host'] ?? '')));
+            if (!valid_host($host)) {
+                json_out(['ok' => false, 'error' => 'Enter a valid IP address or hostname first.'], 422);
+            }
+            $port = (int) ($_POST['ssh_port'] ?? 22) ?: 22;
+            $sshUser = trim((string) ($_POST['ssh_user'] ?? '')) ?: 'root';
+            if ($port < 1 || $port > 65535 || !preg_match('/^[a-z_][a-z0-9_.\-]{0,31}$/i', $sshUser)) {
+                json_out(['ok' => false, 'error' => 'Invalid SSH user or port.'], 422);
+            }
+            $sid = (int) ($_POST['server_id'] ?? 0);
+            $srv = $sid ? row('SELECT id, host, ssh_pass, ssh_fingerprint FROM servers WHERE id = ?', [$sid]) : null;
+            $pass = (string) ($_POST['ssh_pass'] ?? '');
+            if ($pass === '' && $srv && $srv['host'] === $host) {
+                $pass = decrypt_str($srv['ssh_pass']);
+            }
+            $trustNew = ($_POST['trust_new'] ?? '') === '1';
+            $known = ($srv && $srv['host'] === $host) ? (string) $srv['ssh_fingerprint'] : (string) ($_POST['known_fp'] ?? '');
+            $known = valid_fingerprint($known) ? $known : null;
+
+            $geo = geo_lookup($host);
+            $ssh = $pass !== ''
+                ? discover_ssh($host, $port, $sshUser, $pass, $trustNew ? null : $known)
+                : ['ok' => false, 'skipped' => true, 'error' => 'Enter the root password to also read OS & specs.'];
+            unset($pass);
+
+            if ($srv && !empty($ssh['ok']) && $srv['host'] === $host && (!$srv['ssh_fingerprint'] || $trustNew)) {
+                db_update('servers', ['ssh_fingerprint' => $ssh['fingerprint']], 'id = ?', [$sid]);
+            }
+            audit('server_discover', $sshUser . '@' . $host . ':' . $port . ' — '
+                . (!empty($ssh['ok']) ? 'read-only details fetched' : (!empty($ssh['skipped']) ? 'location only' : 'SSH: ' . $ssh['error'])));
+            json_out(['ok' => true, 'geo' => $geo, 'ssh' => $ssh]);
+
         case 'tg_test':
             if (!$isPost) {
                 json_out(['ok' => false], 405);

@@ -41,6 +41,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         'expires_at'   => post('expires_at') ?: null,
         'notes'        => post('notes', '', 3000) ?: null,
     ];
+    $fp = post('ssh_fingerprint', '', 120);
+    if ($fp !== '' && valid_fingerprint($fp)) {
+        $d['ssh_fingerprint'] = $fp;
+    } elseif ($server && $server['host'] !== $d['host']) {
+        $d['ssh_fingerprint'] = null; // new machine → forget old host key
+    }
     $enabled = isset($_POST['enabled']) ? 1 : 0;
 
     if ($d['name'] === '') {
@@ -173,6 +179,20 @@ layout_start($isEdit ? 'Edit server' : 'Add server', 'servers',
         </div>
       </div>
       <p class="muted small"><?= icon('shield') ?> Encrypted with your unique app key before saving. Viewing requires your dashboard password and is logged.</p>
+      <input type="hidden" name="ssh_fingerprint" value="">
+      <div class="discover-box" data-discover data-server-id="<?= $isEdit ? (int) $server['id'] : 0 ?>" data-known-fp="<?= e((string) ($server['ssh_fingerprint'] ?? '')) ?>">
+        <button class="btn btn-ghost w-full" type="button" data-discover-run><?= icon('zap') ?>Auto-detect location, OS &amp; specs</button>
+        <div class="discover-note">
+          <span class="pill pill-up xs"><?= icon('eye') ?>Read-only</span>
+          <span class="muted small">Nothing is installed or changed on the server. Only the IP is sent to ipinfo.io for location.</span>
+        </div>
+        <details class="discover-cmds">
+          <summary class="muted small">Exactly what runs on the server</summary>
+          <code><?= e(implode(' · ', discover_commands_list())) ?></code>
+          <p class="muted small">The SSH host key is checked before the password is sent. The login shows up in the server's own login history (e.g. <code>last</code>).</p>
+        </details>
+        <div class="discover-result" hidden></div>
+      </div>
     </div>
 
     <div class="card glass anim-in" style="--d:.15s">

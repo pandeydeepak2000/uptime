@@ -83,7 +83,7 @@ function db_update(string $table, array $data, string $where, array $params = []
     return q($sql, array_merge(array_values($data), $params))->rowCount();
 }
 
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 /**
  * Upgrade an existing database in place (runs once per version bump).
@@ -94,14 +94,20 @@ function db_migrate(): void
     if ($v >= DB_VERSION) {
         return;
     }
-    if ($v < 2) {
+    $addColumn = function (string $sql) {
         try {
-            db()->exec('ALTER TABLE users ADD COLUMN email VARCHAR(190) NULL');
+            db()->exec($sql);
         } catch (PDOException $e) {
             if (stripos($e->getMessage(), 'duplicate') === false) {
                 throw $e;
             }
         }
+    };
+    if ($v < 2) {
+        $addColumn('ALTER TABLE users ADD COLUMN email VARCHAR(190) NULL');
+    }
+    if ($v < 3) {
+        $addColumn('ALTER TABLE servers ADD COLUMN ssh_fingerprint VARCHAR(120) NULL');
     }
     setting_set('db_version', DB_VERSION);
 }
@@ -158,6 +164,7 @@ function db_schema(string $driver): array
             `ssh_port` INT NOT NULL DEFAULT 22,
             `ssh_user` VARCHAR(64) NULL,
             `ssh_pass` TEXT NULL,
+            `ssh_fingerprint` VARCHAR(120) NULL,
             `location` VARCHAR(100) NULL,
             `os` VARCHAR(100) NULL,
             `specs` VARCHAR(190) NULL,
