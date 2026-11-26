@@ -941,6 +941,14 @@ function service_to_server(int $serviceId): ?int
 /** Cron helper: sync at most one provider per run, each roughly every 12 hours. */
 function provider_sync_due(): ?array
 {
-    $p = row('SELECT id FROM providers WHERE sync_enabled = 1 AND (last_sync_at IS NULL OR last_sync_at < ?) ORDER BY last_sync_at', [time() - 43200]);
-    return $p ? provider_sync((int) $p['id']) : null;
+    $due = rows('SELECT id, totp_secret, last_sync_status FROM providers WHERE sync_enabled = 1 AND (last_sync_at IS NULL OR last_sync_at < ?) ORDER BY last_sync_at', [time() - 43200]);
+    foreach ($due as $p) {
+        // 2FA provider without a saved secret: a cron login can never finish, so don't keep
+        // logging in to the provider unattended — the user syncs it with "Sync now" + code.
+        if (empty($p['totp_secret']) && stripos((string) $p['last_sync_status'], 'two-factor (2FA) code') !== false) {
+            continue;
+        }
+        return provider_sync((int) $p['id']);
+    }
+    return null;
 }
