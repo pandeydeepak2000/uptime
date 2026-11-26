@@ -92,6 +92,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     $newPass = (string) ($_POST['ssh_pass'] ?? '');
+    if ($newPass !== '' && verify_current_password((int) $user['id'], $newPass)) {
+        $errors[] = 'That is your Uptime dashboard login password, not the server root password — your browser probably auto-filled it. Nothing was saved; type the root password.';
+        $newPass = '';
+    }
     if (!$errors) {
         if ($newPass !== '') {
             $d['ssh_pass'] = encrypt_str($newPass);
@@ -185,7 +189,7 @@ layout_start($isEdit ? 'Edit server' : 'Add server', 'servers',
         <div class="field"><label>SSH port</label><input class="input" type="number" min="1" max="65535" name="ssh_port" value="<?= $v('ssh_port', 22) ?>"></div>
         <div class="field col-2">
           <label>Root password <?= $isEdit && !empty($server['ssh_pass']) ? '<span class="muted small">(saved — leave blank to keep)</span>' : '' ?></label>
-          <div class="input-ico"><?= icon('lock') ?><input class="input mono" id="sshPass" type="password" name="ssh_pass" autocomplete="new-password" placeholder="<?= $isEdit && !empty($server['ssh_pass']) ? '••••••••••••' : 'Enter root password' ?>">
+          <div class="input-ico"><?= icon('lock') ?><input class="input mono" id="sshPass" type="password" name="ssh_pass" autocomplete="new-password" readonly data-no-autofill placeholder="<?= $isEdit && !empty($server['ssh_pass']) ? '••••••••••••' : 'Enter root password' ?>">
             <button class="icon-btn input-eye" type="button" data-toggle-pw="#sshPass"><?= icon('eye') ?></button></div>
           <?php if ($isEdit && !empty($server['ssh_pass'])): ?>
             <label class="check mt-1"><input type="checkbox" name="clear_pass"> Remove saved password</label>

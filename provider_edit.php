@@ -41,6 +41,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $errors[] = 'Support email is invalid.';
     }
     $pw = (string) ($_POST['account_pass'] ?? '');
+    if ($pw !== '' && verify_current_password((int) $user['id'], $pw)) {
+        $errors[] = 'That is your Uptime dashboard login password, not the provider password — your browser probably auto-filled it. Nothing was saved; type the provider\'s own password.';
+        $pw = '';
+    }
     $apiType = post('api_type') === 'ovh' ? 'ovh' : 'whmcs';
     $d['api_type'] = $apiType;
 
@@ -109,7 +113,7 @@ layout_start($isEdit ? 'Edit provider' : 'Add provider', 'providers', 'Hosting c
     <div class="field"><label>Client area / panel URL</label><input class="input" name="panel_url" value="<?= $v('panel_url') ?>" placeholder="https://my.provider.com"></div>
     <div class="field"><label>Panel username / email</label><input class="input mono" name="account_user" value="<?= $v('account_user') ?>"></div>
     <div class="field"><label>Panel password <?= $isEdit && !empty($prov['account_pass']) ? '<span class="muted small">(saved — blank keeps it)</span>' : '' ?></label>
-      <div class="input-ico"><?= icon('lock') ?><input class="input mono" id="provPass" type="password" name="account_pass" autocomplete="new-password">
+      <div class="input-ico"><?= icon('lock') ?><input class="input mono" id="provPass" type="password" name="account_pass" autocomplete="new-password" readonly data-no-autofill>
         <button class="icon-btn input-eye" type="button" data-toggle-pw="#provPass"><?= icon('eye') ?></button></div>
       <?php if ($isEdit && !empty($prov['account_pass'])): ?><label class="check mt-1"><input type="checkbox" name="clear_pass"> Remove saved password</label><?php endif; ?>
     </div>
@@ -137,8 +141,8 @@ layout_start($isEdit ? 'Edit provider' : 'Add provider', 'providers', 'Hosting c
       <div class="field col-2"><label>OVH region</label>
         <select class="input" name="ovh_endpoint"><?php foreach (OVH_ENDPOINTS as $k => $ep): ?><option value="<?= e($k) ?>" <?= ($cfgView['endpoint'] ?? 'ovh-eu') === $k ? 'selected' : '' ?>><?= e($ep['label']) ?></option><?php endforeach; ?></select></div>
       <div class="field"><label>Application key</label><input class="input mono" name="ovh_app_key" placeholder="<?= !empty($cfgView['app_key']) ? 'Saved — blank keeps it' : '' ?>" autocomplete="off"></div>
-      <div class="field"><label>Application secret</label><input class="input mono" type="password" name="ovh_app_secret" placeholder="<?= !empty($cfgView['app_secret']) ? 'Saved — blank keeps it' : '' ?>" autocomplete="new-password"></div>
-      <div class="field col-2"><label>Consumer key</label><input class="input mono" type="password" name="ovh_consumer_key" placeholder="<?= !empty($cfgView['consumer_key']) ? 'Saved — blank keeps it' : '' ?>" autocomplete="new-password"></div>
+      <div class="field"><label>Application secret</label><input class="input mono" type="password" readonly data-no-autofill name="ovh_app_secret" placeholder="<?= !empty($cfgView['app_secret']) ? 'Saved — blank keeps it' : '' ?>" autocomplete="new-password"></div>
+      <div class="field col-2"><label>Consumer key</label><input class="input mono" type="password" readonly data-no-autofill name="ovh_consumer_key" placeholder="<?= !empty($cfgView['consumer_key']) ? 'Saved — blank keeps it' : '' ?>" autocomplete="new-password"></div>
       <div class="col-2 callout">
         <div class="callout-title"><?= icon('key') ?>Create read-only OVH keys (2 minutes)</div>
         <ol class="import-steps">

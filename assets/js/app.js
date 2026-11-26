@@ -603,3 +603,16 @@
   document.addEventListener('mouseover', showTip);
   document.addEventListener('mouseout', hideTip);
 })();
+
+/* Secret fields start readonly so the browser can't silently auto-fill the dashboard
+   login password into them; they unlock as soon as the user clicks/taps/tabs in. */
+(function () {
+  'use strict';
+  var unlock = function (e) {
+    var el = e.target && e.target.closest ? e.target.closest('[data-no-autofill]') : null;
+    if (el && el.readOnly) el.readOnly = false;
+  };
+  ['pointerdown', 'touchstart', 'focusin'].forEach(function (ev) {
+    document.addEventListener(ev, unlock, true);
+  });
+})();

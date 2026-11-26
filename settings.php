@@ -214,7 +214,7 @@ layout_start('Settings', 'settings', 'Monitoring, Telegram alerts, security &amp
           <label class="switch"><input type="checkbox" name="tg_enabled" <?= $chk('tg_enabled') ?>><span class="slider"></span><span>Enabled</span></label></div>
         <div class="form-grid">
           <div class="field col-2"><label>Bot token <?= $hasToken ? '<span class="pill pill-up xs">' . icon('lock') . 'saved &amp; encrypted</span>' : '' ?></label>
-            <div class="input-ico"><?= icon('key') ?><input class="input mono" id="tgToken" type="password" name="tg_token" placeholder="<?= $hasToken ? 'Leave blank to keep current token' : '123456789:AAH…' ?>" autocomplete="off">
+            <div class="input-ico"><?= icon('key') ?><input class="input mono" id="tgToken" type="password" readonly data-no-autofill name="tg_token" placeholder="<?= $hasToken ? 'Leave blank to keep current token' : '123456789:AAH…' ?>" autocomplete="off">
               <button class="icon-btn input-eye" type="button" data-toggle-pw="#tgToken"><?= icon('eye') ?></button></div>
             <?php if ($hasToken): ?><label class="check mt-1"><input type="checkbox" name="tg_clear_token"> Remove saved token</label><?php endif; ?>
           </div>
