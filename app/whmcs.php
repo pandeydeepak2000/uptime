@@ -94,7 +94,7 @@ class WhmcsClient
             throw new WhmcsSyncException('Could not connect to the client area: ' . ($err ?: 'no response'));
         }
         if (self::isBotWall($body, $code)) {
-            throw new WhmcsSyncException('The provider shows a browser/bot check (e.g. Cloudflare). Automatic sync is not possible for this provider.');
+            throw new WhmcsSyncException('The provider shows a browser/bot check (e.g. Cloudflare). Automatic sync is not possible for this provider.', 1);
         }
         return ['code' => $code, 'body' => $body, 'url' => $final];
     }
@@ -109,9 +109,42 @@ class WhmcsClient
         return ($code === 403 || $code === 503) && (stripos($html, 'cf-chl') !== false || stripos($html, 'Just a moment') !== false || stripos($html, 'challenge-platform') !== false);
     }
 
+    /** Text of the provider's error/alert box on a page, e.g. "Login Details Incorrect". */
+    public static function alertText(string $html): string
+    {
+        $x = self::dom($html);
+        // ignore hidden templates & modals (e.g. WHMCS password-generator dialog)
+        $visible = 'not(ancestor-or-self::*[contains(@class,"modal") or contains(@class,"d-none") or contains(@class,"hidden") or contains(@class,"w-hidden")'
+            . ' or contains(translate(@style," ",""),"display:none")])';
+        $queries = [
+            '//*[(contains(@class,"alert-danger") or contains(@class,"alert-error") or contains(@class,"errorbox")) and ' . $visible . ']',
+            '//*[contains(@class,"alert-warning") and ' . $visible . ']', // only if it looks login-related (skip cookie banners etc.)
+        ];
+        foreach ($queries as $i => $qs) {
+            foreach ($x->query($qs) ?: [] as $el) {
+                $t = trim(preg_replace('/\s+/', ' ', $el->textContent));
+                if ($t === '' || strlen($t) <= 3 || stripos($t, 'cookie') !== false) {
+                    continue;
+                }
+                if ($i === 1 && !preg_match('~login|password|incorrect|banned|attempt|locked|verify~i', $t)) {
+                    continue;
+                }
+                return substr($t, 0, 160);
+            }
+        }
+        foreach (['Login Details Incorrect', 'has been banned', 'too many failed', 'account has been locked', 'account is locked'] as $needle) {
+            if (preg_match('~[^<>.]{0,60}' . preg_quote($needle, '~') . '[^<>]{0,80}~i', strip_tags(preg_replace('~<(script|style)\b.*?</\1>~is', ' ', $html)), $m)) {
+                return substr(trim(preg_replace('/\s+/', ' ', $m[0])), 0, 160);
+            }
+        }
+        return '';
+    }
+
     private static function hasCaptcha(string $html): bool
     {
-        foreach (['g-recaptcha', 'recaptcha/api.js', 'h-captcha', 'hcaptcha.com', 'cf-turnstile', 'challenges.cloudflare.com/turnstile', 'name="code" id="inputCaptcha"', 'inputCaptcha', 'captcha.php'] as $m) {
+        // note: WHMCS prints a global `var recaptcha = {...}` config on every page even when the
+        // login form has no captcha — so we look for the actual widget / button markers only.
+        foreach (['g-recaptcha', 'btn-recaptcha', 'recaptcha-container', '<script src="https://www.google.com/recaptcha/api.js', 'h-captcha', 'hcaptcha.com/1/api.js', 'cf-turnstile', 'challenges.cloudflare.com/turnstile', 'inputCaptcha', 'captcha.php'] as $m) {
             if (stripos($html, $m) !== false) {
                 return true;
             }
@@ -182,7 +215,7 @@ class WhmcsClient
             throw new WhmcsSyncException('Could not find a login form. Check the "Client area / panel URL" (e.g. https://clients.provider.com/clientarea.php).');
         }
         if (self::hasCaptcha($page['body'])) {
-            throw new WhmcsSyncException('This provider uses a CAPTCHA on login, so automatic sync is not possible. Keep this provider manual.');
+            throw new WhmcsSyncException('This provider uses a CAPTCHA on login, so automatic sync is not possible. Keep this provider manual.', 1);
         }
 
         $fields = [];
@@ -217,15 +250,25 @@ class WhmcsClient
         $html = $r['body'];
 
         if (preg_match('~two.?factor|2fa|backup ?code|authenticator|name="key"~i', $html) && !self::isLoggedIn($html)) {
-            throw new WhmcsSyncException('This account has two-factor authentication on the provider side, so automatic sync is not possible.');
+            throw new WhmcsSyncException('This account has two-factor authentication on the provider side, so automatic sync is not possible.', 1);
         }
         if (!self::isLoggedIn($html)) {
+            $said = self::alertText($html);
+            if ($said !== '') {
+                $this->step('Provider says: “' . $said . '”');
+            }
             $r = $this->req($this->base . 'clientarea.php');
             if (!self::isLoggedIn($r['body'])) {
                 if (self::hasCaptcha($html) || self::hasCaptcha($r['body'])) {
-                    throw new WhmcsSyncException('The provider asked for a CAPTCHA after the login attempt. Automatic sync is not possible.');
+                    throw new WhmcsSyncException('The provider asked for a CAPTCHA after the login attempt. Automatic sync is not possible.', 1);
                 }
-                throw new WhmcsSyncException('Login failed — check the panel username/email and password saved for this provider.');
+                if ($said === '') {
+                    $said = self::alertText($r['body']);
+                }
+                $hint = preg_match('~banned|too many|locked|blocked~i', $said)
+                    ? ' The provider has temporarily blocked logins from this server — wait before trying again.'
+                    : ' First log in at the provider yourself (private window) with exactly the same email & password, then re-save the password here.';
+                throw new WhmcsSyncException('Login failed' . ($said !== '' ? ' — provider says: “' . $said . '”.' : '.') . $hint, 1);
             }
         }
         $this->step('Logged in ✓');
@@ -460,7 +503,13 @@ function provider_sync(int $providerId): array
         $list = $client->services();
         $client->logout();
     } catch (WhmcsSyncException $e) {
-        return $finish(false, $p['name'] . ': ' . $e->getMessage(), $client ? $client->trace : []);
+        $msg = $p['name'] . ': ' . $e->getMessage();
+        if ($e->getCode() === 1 && (int) $p['sync_enabled']) {
+            // login-type problem: stop automatic retries so the provider doesn't lock the account / ban our IP
+            db_update('providers', ['sync_enabled' => 0], 'id = ?', [$providerId]);
+            $msg .= ' Auto-sync paused.';
+        }
+        return $finish(false, $msg, $client ? $client->trace : []);
     } catch (Throwable $e) {
         log_file('app.log', 'sync ' . $p['name'] . ': ' . $e->getMessage());
         return $finish(false, $p['name'] . ': unexpected error — ' . substr($e->getMessage(), 0, 120), $client ? $client->trace : []);
