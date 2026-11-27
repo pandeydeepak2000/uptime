@@ -84,7 +84,7 @@ layout_start('Services & Licenses', 'services', 'Everything you pay for — sync
           $dead = in_array(strtolower((string) $s['status']), ['cancelled', 'terminated'], true);
           ?>
         <tr data-status="<?= e($s['kind']) ?>" data-state="<?= e(service_state($s['status'])) ?>" data-provider="<?= (int) $s['provider_id'] ?>"
-            data-search="<?= e(strtolower($s['name'] . ' ' . $s['ip'] . ' ' . $s['hostname'] . ' ' . $s['provider_name'] . ' ' . $s['server_name'] . ' ' . $s['client_name'])) ?>" class="<?= $dead ? 'row-dim' : '' ?>">
+            data-search="<?= e(strtolower($s['name'] . ' ' . $s['ip'] . ' ' . $s['hostname'] . ' ' . $s['server_host'] . ' ' . $s['provider_name'] . ' ' . $s['server_name'] . ' ' . $s['client_name'])) ?>" class="<?= $dead ? 'row-dim' : '' ?>">
           <td>
             <span class="cell-title"><?= e($s['name']) ?></span>
             <div class="cell-sub"><?= $s['source'] !== 'manual' ? '<span class="pill pill-up xs">' . icon('refresh') . 'Synced</span>' : '<span class="pill pill-unknown xs">Manual</span>' ?>

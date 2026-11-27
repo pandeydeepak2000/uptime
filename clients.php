@@ -65,7 +65,7 @@ $itemsTable = function (array $its, string $tableId, string $back) use ($byId, $
             $cl = $it['client_id'] !== null ? ($byId[$it['client_id']] ?? null) : null;
             $left = $it['next_due'] ? (int) round((strtotime($it['next_due']) - $today) / 86400) : null; ?>
           <tr data-status="<?= e($it['kind']) ?>" data-client="<?= $cl ? (int) $cl['id'] : 'own' ?>" data-provider="<?= (int) $it['provider_id'] ?>"
-              data-search="<?= e(strtolower($it['name'] . ' ' . $it['sub'] . ' ' . $it['server_name'] . ' ' . $it['provider_name'] . ' ' . ($cl['name'] ?? 'own'))) ?>">
+              data-search="<?= e(strtolower($it['name'] . ' ' . $it['sub'] . ' ' . $it['find'] . ' ' . $it['server_name'] . ' ' . $it['provider_name'] . ' ' . ($cl['name'] ?? 'own'))) ?>">
             <td class="w-check"><?php if (can('edit')): ?><input type="checkbox" name="items[]" value="<?= e($it['key']) ?>" data-row-check><?php endif; ?></td>
             <td>
               <?php if ($it['kind'] === 'license'): ?>

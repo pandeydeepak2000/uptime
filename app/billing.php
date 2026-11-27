@@ -64,6 +64,7 @@ function billing_items(): array
             'sub'            => $ps['kind'] === 'license' ? ($ps['ip'] ?: ($srv['host'] ?? ($ps['hostname'] ?? '')))
                                                           : ($ps['hostname'] ?: ($ps['ip'] ?: ($srv['host'] ?? ''))),
             'server_name'    => $srv['name'] ?? null,
+            'find'           => implode(' ', [$ps['ip'], $ps['hostname'], $srv['host'] ?? '', $srv['name'] ?? '']), // every IP / host, for search
             'kind'           => kind_key($ps['kind']),
             'provider_id'    => (int) $ps['provider_id'],
             'provider_name'  => $ps['provider_name'],
@@ -91,6 +92,7 @@ function billing_items(): array
             'name'           => $s['name'],
             'sub'            => $s['host'],
             'server_name'    => null,
+            'find'           => (string) $s['host'],
             'kind'           => 'vps',
             'provider_id'    => (int) $s['provider_id'],
             'provider_name'  => $s['provider_name'],
