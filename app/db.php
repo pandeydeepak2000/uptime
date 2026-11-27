@@ -83,7 +83,7 @@ function db_update(string $table, array $data, string $where, array $params = []
     return q($sql, array_merge(array_values($data), $params))->rowCount();
 }
 
-const DB_VERSION = 8;
+const DB_VERSION = 9;
 
 /**
  * Upgrade an existing database in place (runs once per version bump).
@@ -163,6 +163,10 @@ function db_migrate(): void
         $addColumn('ALTER TABLE users ADD COLUMN must_change_pw INT NOT NULL DEFAULT 0');
         $addColumn('ALTER TABLE users ADD COLUMN created_by INT NULL');
         db()->exec(db_ignored_schema((string) config('db.driver', 'mysql')));
+    }
+    if ($v < 9) {
+        // servers that kept a placeholder name ("lagomshowservice") from an old import → use their hostname
+        repair_placeholder_server_names();
     }
     setting_set('db_version', DB_VERSION);
 }

@@ -857,11 +857,6 @@ function provider_save_services(int $providerId, array $list, bool $replace = tr
             $srv = $byId[$serverId];
             if ($kind !== 'license') {
                 $upd = [];
-                // server was created from this service under its old (e.g. placeholder) name → follow the new name
-                if ($existing && $srv['name'] === substr((string) $existing['name'], 0, 100) && $s['name'] !== $existing['name']
-                    && !preg_match('/^Service #\d+$/', $s['name'])) {
-                    $upd['name'] = substr($s['name'], 0, 100);
-                }
                 if ($due) {
                     $upd['expires_at'] = $due;
                 }
@@ -922,6 +917,7 @@ function provider_save_services(int $providerId, array $list, bool $replace = tr
     }
     $unmonitored = (int) val("SELECT COUNT(*) FROM provider_services WHERE provider_id = ? AND kind = 'vps' AND server_id IS NULL
                               AND (ip IS NOT NULL OR hostname IS NOT NULL) AND (status IS NULL OR LOWER(status) IN ('active', 'suspended'))", [$providerId]);
+    repair_placeholder_server_names();
     return ['count' => count($list), 'linked' => $linked, 'gone' => $gone, 'unmonitored' => $unmonitored, 'logins' => $logins];
 }
 
@@ -986,4 +982,44 @@ function provider_sync_due(): ?array
         return provider_sync((int) $p['id']);
     }
     return null;
+}
+
+/** Names that came from a page we could not read properly (e.g. Lagom theme "lagomshowservice"). */
+function is_placeholder_name(?string $n): bool
+{
+    $n = trim((string) $n);
+    return $n === '' || (bool) preg_match('~^(lagomshowservice|lagom\w*|details?|overview|product details|manage|information|other|s|service ?#?\d*)$~i', $n);
+}
+
+/**
+ * Give servers with a placeholder name a real one: their own hostname, else the linked
+ * service's hostname, else the linked service's (real) product name. Returns how many changed.
+ */
+function repair_placeholder_server_names(): int
+{
+    $isDomain = fn ($h) => is_string($h) && $h !== '' && !filter_var($h, FILTER_VALIDATE_IP) && strpos($h, '.') !== false && valid_host($h);
+    $n = 0;
+    foreach (rows('SELECT id, name, host FROM servers') as $srv) {
+        if (!is_placeholder_name($srv['name'])) {
+            continue;
+        }
+        $new = $isDomain($srv['host']) ? $srv['host'] : '';
+        if ($new === '') {
+            foreach (rows("SELECT name, hostname FROM provider_services WHERE server_id = ? AND kind <> 'license' ORDER BY id", [(int) $srv['id']]) as $ps) {
+                if ($isDomain($ps['hostname'])) {
+                    $new = $ps['hostname'];
+                    break;
+                }
+                if (!is_placeholder_name($ps['name'])) {
+                    $new = $ps['name'];
+                }
+            }
+        }
+        if ($new !== '' && $new !== $srv['name']) {
+            db_update('servers', ['name' => substr($new, 0, 100)], 'id = ?', [(int) $srv['id']]);
+            audit('server_updated', 'Renamed "' . $srv['name'] . '" → "' . $new . '" (placeholder name from an old import)');
+            $n++;
+        }
+    }
+    return $n;
 }
