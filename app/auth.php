@@ -92,10 +92,15 @@ function auth_user(): ?array
         logout_user();
         return $cache = null;
     }
-    $u = row('SELECT id, username, email, totp_enabled, last_login_at, last_login_ip FROM users WHERE id = ?', [$uid]);
-    if (!$u) {
+    $u = row('SELECT id, username, email, totp_enabled, last_login_at, last_login_ip, role, can_reveal, active, session_epoch, must_change_pw
+              FROM users WHERE id = ?', [$uid]);
+    // disabled account, or the admin changed its role / password / email → every open session ends
+    if (!$u || !(int) $u['active'] || (int) $u['session_epoch'] !== (int) ($_SESSION['epoch'] ?? 0)) {
         logout_user();
         return $cache = null;
+    }
+    if (!isset(ROLES[$u['role']])) {
+        $u['role'] = 'viewer'; // unknown role → least privilege
     }
     $_SESSION['last'] = time();
     $GLOBALS['_AUTH_USER'] = $u;
@@ -106,6 +111,16 @@ function require_login(bool $api = false): array
 {
     $u = auth_user();
     if ($u) {
+        // a new / reset account must set its own password before doing anything else
+        $script = basename((string) ($_SERVER['SCRIPT_NAME'] ?? ''));
+        $statusPoll = $script === 'api.php' && ($_GET['action'] ?? '') === 'status';
+        if ((int) $u['must_change_pw'] && !$statusPoll && !in_array($script, ['settings.php', 'logout.php'], true)) {
+            if ($api) {
+                json_out(['ok' => false, 'error' => 'Set your own password first (Settings → My account).'], 403);
+            }
+            flash('info', 'Welcome! Please set your own password before you continue.');
+            redirect('settings.php#security');
+        }
         return $u;
     }
     if ($api) {
@@ -115,14 +130,69 @@ function require_login(bool $api = false): array
     return [];
 }
 
+/* ------------------------------------------------------------------
+ | Roles & permissions (checked on the server for every page / API call)
+ |  admin   — everything: settings, team, providers & their logins, delete
+ |  support — check, pause/resume, add/edit servers, services, clients;
+ |            root passwords only if "can view root passwords" is ticked
+ |  viewer  — read-only dashboards & reports, may run "Check now"
+ * -----------------------------------------------------------------*/
+const ROLES = ['admin' => 'Admin', 'support' => 'Support', 'viewer' => 'Viewer (read-only)'];
+
+function can(string $perm, ?array $u = null): bool
+{
+    $u = $u ?? ($GLOBALS['_AUTH_USER'] ?? null);
+    if (!$u) {
+        return false;
+    }
+    $role = $u['role'] ?? 'viewer';
+    if ($role === 'admin') {
+        return true;
+    }
+    switch ($perm) {
+        case 'view':
+        case 'check':
+            return true;
+        case 'edit':
+            return $role === 'support';
+        case 'reveal':
+            return $role === 'support' && (int) ($u['can_reveal'] ?? 0) === 1;
+        default:
+            return false; // 'admin' (settings, team, providers, delete, activity log)
+    }
+}
+
+function require_perm(string $perm, bool $api = false): void
+{
+    if (can($perm)) {
+        return;
+    }
+    audit('access_denied', 'Needs "' . $perm . '": ' . substr((string) ($_SERVER['REQUEST_URI'] ?? ''), 0, 200));
+    if ($api) {
+        json_out(['ok' => false, 'error' => 'Your account does not have permission for this.'], 403);
+    }
+    flash('error', 'Your account does not have permission for that. Ask the admin.');
+    redirect('dashboard.php');
+}
+
+function role_label(?array $u): string
+{
+    return ROLES[$u['role'] ?? 'viewer'] ?? 'Viewer';
+}
+
 function login_user(array $user): void
 {
     session_regenerate_id(true);
     $_SESSION = [];
     $_SESSION['uid'] = (int) $user['id'];
+    $_SESSION['epoch'] = (int) ($user['session_epoch'] ?? 0);
     $_SESSION['ua'] = ua_hash();
     $_SESSION['last'] = time();
     $_SESSION['login_at'] = time();
+    $srvIp = (string) ($_SERVER['SERVER_ADDR'] ?? '');
+    if (filter_var($srvIp, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) && $srvIp !== setting('monitor_ip')) {
+        setting_set('monitor_ip', $srvIp); // shown in "why is it down" (whitelist this IP in the server firewall)
+    }
     $ip = client_ip();
     db_update('users', ['last_login_at' => time(), 'last_login_ip' => $ip], 'id = ?', [(int) $user['id']]);
     $u = full_url('');
@@ -234,9 +304,9 @@ function find_login_user(string $login): ?array
         return null;
     }
     if (strpos($login, '@') !== false) {
-        return row('SELECT * FROM users WHERE LOWER(email) = ?', [strtolower($login)]);
+        return row('SELECT * FROM users WHERE LOWER(email) = ? AND active = 1', [strtolower($login)]);
     }
-    return row("SELECT * FROM users WHERE username = ? AND (email IS NULL OR email = '')", [$login]);
+    return row("SELECT * FROM users WHERE username = ? AND (email IS NULL OR email = '') AND active = 1", [$login]);
 }
 
 function verify_current_password(int $uid, string $pw): bool

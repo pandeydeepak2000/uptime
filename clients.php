@@ -10,6 +10,7 @@ foreach ($clients as $c) {
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     csrf_check();
+    require_perm('edit');
     $keys = array_slice(array_map('strval', (array) ($_POST['items'] ?? [])), 0, 2000);
     $to = (int) post('client_id');
     $to = $to && isset($byId[$to]) ? $to : null;
@@ -57,7 +58,7 @@ $itemsTable = function (array $its, string $tableId, string $back) use ($byId, $
     <?= csrf_field() ?><input type="hidden" name="back" value="<?= e($back) ?>">
     <div class="table-wrap">
       <table class="table table-compact" id="<?= e($tableId) ?>">
-        <thead><tr><th class="w-check"><input type="checkbox" data-check-all="#<?= e($tableId) ?>" title="Select all shown"></th>
+        <thead><tr><th class="w-check"><?php if (can('edit')): ?><input type="checkbox" data-check-all="#<?= e($tableId) ?>" title="Select all shown"><?php endif; ?></th>
           <th>Server / license</th><th>Type</th><th>Provider (you pay)</th><th>Used by</th><th class="right">Monthly</th><th>Next due</th><th class="right sticky-col"></th></tr></thead>
         <tbody>
         <?php foreach ($its as $it):
@@ -65,7 +66,7 @@ $itemsTable = function (array $its, string $tableId, string $back) use ($byId, $
             $left = $it['next_due'] ? (int) round((strtotime($it['next_due']) - $today) / 86400) : null; ?>
           <tr data-status="<?= e($it['kind']) ?>" data-client="<?= $cl ? (int) $cl['id'] : 'own' ?>" data-provider="<?= (int) $it['provider_id'] ?>"
               data-search="<?= e(strtolower($it['name'] . ' ' . $it['sub'] . ' ' . $it['server_name'] . ' ' . $it['provider_name'] . ' ' . ($cl['name'] ?? 'own'))) ?>">
-            <td class="w-check"><input type="checkbox" name="items[]" value="<?= e($it['key']) ?>" data-row-check></td>
+            <td class="w-check"><?php if (can('edit')): ?><input type="checkbox" name="items[]" value="<?= e($it['key']) ?>" data-row-check><?php endif; ?></td>
             <td>
               <?php if ($it['kind'] === 'license'): ?>
                 <span class="cell-title"><?= e($it['name']) ?></span>
@@ -82,15 +83,16 @@ $itemsTable = function (array $its, string $tableId, string $back) use ($byId, $
             <td class="right nowrap"><?php if ($it['monthly'] === 0.0): ?><span class="muted small">Not recurring</span>
               <?php elseif ($it['monthly'] !== null): ?><b><?= e(money_one($it['monthly'], $it['currency'])) ?></b>
               <?= $it['cycle'] && strtolower((string) $it['cycle']) !== 'monthly' ? '<div class="cell-sub muted">' . e((string) $it['cycle']) . '</div>' : '' ?>
-              <?php else: ?><a class="link small" href="<?= e(url($it['edit'])) ?>">Set price</a><?php endif; ?></td>
+              <?php elseif (can('edit')): ?><a class="link small" href="<?= e(url($it['edit'])) ?>">Set price</a><?php else: ?>—<?php endif; ?></td>
             <td class="nowrap"><?= $it['next_due'] ? e(date('d M Y', strtotime($it['next_due']))) . ($left !== null && $left <= 7 ? ' <span class="pill xs ' . ($left < 0 ? 'pill-down' : 'pill-warn') . '">' . ($left < 0 ? 'Overdue' : $left . 'd') . '</span>' : '') : '—' ?></td>
-            <td class="right sticky-col"><a class="icon-btn sm" href="<?= e(url($it['edit'])) ?>" title="Edit price / details"><?= icon('edit') ?></a></td>
+            <td class="right sticky-col"><?php if (can('edit')): ?><a class="icon-btn sm" href="<?= e(url($it['edit'])) ?>" title="Edit price / details"><?= icon('edit') ?></a><?php endif; ?></td>
           </tr>
         <?php endforeach; ?>
         </tbody>
       </table>
       <div class="empty-filter" hidden><?= icon('filter') ?> Nothing matches your filters.</div>
     </div>
+<?php if (can('edit')): ?>
     <div class="assign-bar" data-assign-bar hidden>
       <span><b data-selected-count>0</b> selected</span>
       <span class="muted small">Mark as used by</span>
@@ -101,6 +103,7 @@ $itemsTable = function (array $its, string $tableId, string $back) use ($byId, $
       <button class="btn btn-primary sm" type="submit" form="<?= e($tableId) ?>Form"><?= icon('check') ?>Assign</button>
       <button class="btn btn-ghost sm" type="button" data-assign-clear>Clear</button>
     </div>
+<?php endif; ?>
   </form>
     <?php return ob_get_clean();
 };

@@ -1,6 +1,7 @@
 <?php
 require __DIR__ . '/app/bootstrap.php';
 $user = require_login();
+require_perm('edit');
 
 $id = (int) ($_GET['id'] ?? ($_POST['id'] ?? 0));
 $server = $id ? row('SELECT * FROM servers WHERE id = ?', [$id]) : null;
@@ -16,6 +17,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = post('action');
 
     if ($action === 'delete' && $server) {
+        require_perm('admin');
         q('DELETE FROM checks WHERE server_id = ?', [$id]);
         q('DELETE FROM incidents WHERE server_id = ?', [$id]);
         q('DELETE FROM servers WHERE id = ?', [$id]);

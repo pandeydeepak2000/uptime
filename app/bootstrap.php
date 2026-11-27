@@ -45,7 +45,7 @@ if (is_dir(APP_ROOT . '/storage/logs')) {
     }
 })();
 
-foreach (['helpers', 'db', 'crypto', 'settings', 'auth', 'monitor', 'telegram', 'report', 'discover', 'whmcs', 'ovh', 'billing', 'icons', 'layout'] as $f) {
+foreach (['helpers', 'db', 'crypto', 'settings', 'auth', 'monitor', 'telegram', 'report', 'discover', 'whmcs', 'ovh', 'billing', 'diagnose', 'icons', 'layout'] as $f) {
     require __DIR__ . '/' . $f . '.php';
 }
 

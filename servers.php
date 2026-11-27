@@ -20,7 +20,7 @@ foreach (build_report(strtotime('today -29 days'), time())['servers'] as $r) {
 $providers = rows('SELECT id, name FROM providers ORDER BY name');
 
 layout_start('Servers', 'servers', 'All VPS & dedicated servers with encrypted root credentials.',
-    '<a class="btn btn-ghost" href="' . e(url('server_edit.php')) . '">' . icon('plus') . '<span class="hide-sm">Add server</span></a>');
+    can('edit') ? '<a class="btn btn-ghost" href="' . e(url('server_edit.php')) . '">' . icon('plus') . '<span class="hide-sm">Add server</span></a>' : '');
 ?>
 <?php if (!$servers): ?>
   <div class="card glass anim-in"><?= empty_state('server', 'No servers yet', 'Add a server with its IP, provider and root login — passwords are encrypted with AES-256-GCM.',
@@ -70,22 +70,26 @@ layout_start('Servers', 'servers', 'All VPS & dedicated servers with encrypted r
           <td class="right nowrap sticky-col">
             <div class="row-actions">
               <button class="icon-btn sm" type="button" data-check="<?= $id ?>" title="Check now"><?= icon('refresh') ?></button>
-              <a class="icon-btn sm" href="<?= e(url('server_edit.php?id=' . $id)) ?>" title="Edit"><?= icon('edit') ?></a>
+              <?php if (can('edit')): ?>              <a class="icon-btn sm" href="<?= e(url('server_edit.php?id=' . $id)) ?>" title="Edit"><?= icon('edit') ?></a><?php endif; ?>
               <details class="row-menu">
                 <summary class="icon-btn sm" title="More"><?= icon('more') ?></summary>
                 <div class="menu">
                   <a href="<?= e(url('server.php?id=' . $id)) ?>"><?= icon('external') ?>Open details</a>
-                  <?php if ($s['ssh_pass']): ?>
+                  <?php if ($s['ssh_pass'] && can('reveal')): ?>
                     <button type="button" data-reveal="server" data-id="<?= $id ?>" data-label="<?= e($s['name']) ?>"><?= icon('key') ?>Show root password</button>
-                  <?php else: ?>
+                  <?php elseif (!$s['ssh_pass'] && can('edit')): ?>
                     <a href="<?= e(url('server_edit.php?id=' . $id)) ?>"><?= icon('key') ?>Add root password</a>
                   <?php endif; ?>
                   <button type="button" data-copy="<?= e('ssh ' . ($s['ssh_user'] ?: 'root') . '@' . $s['host'] . ((int) $s['ssh_port'] !== 22 ? ' -p ' . (int) $s['ssh_port'] : '')) ?>"><?= icon('terminal') ?>Copy SSH command</button>
+                  <?php if (can('edit')): ?>
                   <button type="button" data-toggle-server="<?= $id ?>"><?= icon((int) $s['enabled'] ? 'pause' : 'play') ?><?= (int) $s['enabled'] ? 'Pause monitoring' : 'Resume monitoring' ?></button>
+                  <?php endif; ?>
+                  <?php if (can('admin')): ?>
                   <form method="post" action="<?= e(url('server_edit.php')) ?>" data-confirm="Delete <?= e($s['name']) ?> and all its history? This cannot be undone.">
                     <?= csrf_field() ?><input type="hidden" name="action" value="delete"><input type="hidden" name="id" value="<?= $id ?>">
                     <button type="submit" class="danger"><?= icon('trash') ?>Delete server</button>
                   </form>
+                  <?php endif; ?>
                 </div>
               </details>
             </div>

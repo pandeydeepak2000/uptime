@@ -1,6 +1,7 @@
 <?php
 require __DIR__ . '/app/bootstrap.php';
 $user = require_login();
+require_perm('edit');
 
 $id = (int) ($_GET['id'] ?? ($_POST['id'] ?? 0));
 $svc = $id ? row('SELECT * FROM provider_services WHERE id = ?', [$id]) : null;
@@ -20,10 +21,23 @@ $cycles = ['Monthly', 'Quarterly', 'Semi-Annually', 'Annually', 'Biennially', 'O
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     csrf_check();
     $action = post('action');
-    if ($action === 'delete' && $svc && !$synced) {
+    if ($action === 'delete' && $svc) {
+        require_perm('admin');
+        if ($synced && $svc['remote_id'] !== null && $svc['provider_id']) {
+            // remember it, otherwise the next sync / import would bring it straight back
+            db_insert('ignored_services', ['provider_id' => (int) $svc['provider_id'], 'source' => $svc['source'],
+                'remote_id' => (string) $svc['remote_id'], 'name' => substr((string) $svc['name'], 0, 190), 'created_at' => time()]);
+        }
         q('DELETE FROM provider_services WHERE id = ?', [$id]);
-        audit('service_deleted', $svc['name']);
-        flash('success', 'Deleted "' . $svc['name'] . '".');
+        audit('service_deleted', $svc['name'] . ($synced ? ' (synced — hidden from future syncs)' : ''));
+        flash('success', 'Deleted "' . $svc['name'] . '"' . ($synced ? ' — it will not come back on the next sync.' : '.'));
+        redirect('services.php');
+    }
+    if ($action === 'restore_hidden') {
+        require_perm('admin');
+        $n = q('DELETE FROM ignored_services')->rowCount();
+        audit('service_restored', $n . ' hidden synced service(s) restored');
+        flash('success', $n . ' deleted synced service(s) will come back on the next sync / import.');
         redirect('services.php');
     }
     if ($action === 'renew' && $svc && !$synced) {

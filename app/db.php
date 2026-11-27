@@ -83,7 +83,7 @@ function db_update(string $table, array $data, string $where, array $params = []
     return q($sql, array_merge(array_values($data), $params))->rowCount();
 }
 
-const DB_VERSION = 7;
+const DB_VERSION = 8;
 
 /**
  * Upgrade an existing database in place (runs once per version bump).
@@ -154,7 +154,33 @@ function db_migrate(): void
             }
         }
     }
+    if ($v < 8) {
+        // team accounts: existing users stay full admins
+        $addColumn("ALTER TABLE users ADD COLUMN role VARCHAR(16) NOT NULL DEFAULT 'admin'");
+        $addColumn('ALTER TABLE users ADD COLUMN can_reveal INT NOT NULL DEFAULT 1');
+        $addColumn('ALTER TABLE users ADD COLUMN active INT NOT NULL DEFAULT 1');
+        $addColumn('ALTER TABLE users ADD COLUMN session_epoch INT NOT NULL DEFAULT 0');
+        $addColumn('ALTER TABLE users ADD COLUMN must_change_pw INT NOT NULL DEFAULT 0');
+        $addColumn('ALTER TABLE users ADD COLUMN created_by INT NULL');
+        db()->exec(db_ignored_schema((string) config('db.driver', 'mysql')));
+    }
     setting_set('db_version', DB_VERSION);
+}
+
+/** Synced services you deleted on purpose — later syncs / imports skip them. */
+function db_ignored_schema(string $driver): string
+{
+    $my = $driver !== 'sqlite';
+    $id = $my ? 'INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY' : 'INTEGER PRIMARY KEY AUTOINCREMENT';
+    $end = $my ? ') ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci' : ')';
+    return "CREATE TABLE IF NOT EXISTS `ignored_services` (
+        `id` $id,
+        `provider_id` INT NOT NULL,
+        `source` VARCHAR(10) NOT NULL,
+        `remote_id` VARCHAR(64) NOT NULL,
+        `name` VARCHAR(190) NULL,
+        `created_at` INT NOT NULL DEFAULT 0
+    $end";
 }
 
 /** clients: who a server / license is used for (client_id NULL = own use). */
@@ -231,7 +257,13 @@ function db_schema(string $driver): array
             `totp_enabled` INT NOT NULL DEFAULT 0,
             `created_at` INT NOT NULL DEFAULT 0,
             `last_login_at` INT NULL,
-            `last_login_ip` VARCHAR(64) NULL
+            `last_login_ip` VARCHAR(64) NULL,
+            `role` VARCHAR(16) NOT NULL DEFAULT 'admin',
+            `can_reveal` INT NOT NULL DEFAULT 1,
+            `active` INT NOT NULL DEFAULT 1,
+            `session_epoch` INT NOT NULL DEFAULT 0,
+            `must_change_pw` INT NOT NULL DEFAULT 0,
+            `created_by` INT NULL
         $end",
         'login_attempts' => "CREATE TABLE IF NOT EXISTS `login_attempts` (
             `id` $id,
@@ -330,5 +362,5 @@ function db_schema(string $driver): array
     if (!$my) {
         $indexes = array_map(fn ($s) => str_replace('CREATE INDEX', 'CREATE INDEX IF NOT EXISTS', $s), $indexes);
     }
-    return array_merge(array_values($tables), $indexes, db_services_schema($driver), [db_clients_schema($driver)]);
+    return array_merge(array_values($tables), $indexes, db_services_schema($driver), [db_clients_schema($driver), db_ignored_schema($driver)]);
 }

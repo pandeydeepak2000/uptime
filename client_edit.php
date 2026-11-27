@@ -1,6 +1,7 @@
 <?php
 require __DIR__ . '/app/bootstrap.php';
 $user = require_login();
+require_perm('edit');
 
 $id = (int) ($_GET['id'] ?? ($_POST['id'] ?? 0));
 $client = $id ? row('SELECT * FROM clients WHERE id = ?', [$id]) : null;
@@ -13,6 +14,7 @@ $errors = [];
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     csrf_check();
     if (post('action') === 'delete' && $client) {
+        require_perm('admin');
         q('UPDATE servers SET client_id = NULL WHERE client_id = ?', [$id]);
         q('UPDATE provider_services SET client_id = NULL WHERE client_id = ?', [$id]);
         q('DELETE FROM clients WHERE id = ?', [$id]);

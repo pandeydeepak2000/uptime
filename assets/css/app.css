@@ -880,3 +880,39 @@ thead .sticky-col { background: var(--panel-solid); }
 :root[data-theme="light"] .pill-host { color: #5b3fd6; }
 .lic-on { display: inline-flex; align-items: center; gap: 4px; }
 .lic-on .ico { width: 12px; height: 12px; }
+/* ---------- diagnosis ---------- */
+.diag-card { border-color: rgba(255, 181, 71, .35); }
+.diag-card .card-head h3 .ico { color: var(--warn); }
+.diag-title { font-size: 16px; margin-bottom: 4px; }
+.diag-h { font-size: 13px; font-weight: 700; margin: 16px 0 8px; color: var(--text-2); text-transform: uppercase; letter-spacing: .04em; }
+.diag-list { margin: 0; padding-left: 20px; display: grid; gap: 6px; }
+.diag-list li { line-height: 1.5; }
+.diag-list.fix li::marker { color: var(--up); }
+.diag-cmds { display: grid; gap: 8px; }
+.diag-cmds .secret-box code { white-space: pre-wrap; word-break: break-all; }
+a.stat { color: inherit; text-decoration: none; cursor: pointer; transition: transform .2s, border-color .2s; }
+a.stat:hover { transform: translateY(-3px); border-color: var(--border-hi); }
+/* ---------- team ---------- */
+.alert-warn { background: var(--warn-bg); border: 1px solid rgba(255, 181, 71, .35); color: var(--warn); }
+.team-manage { display: inline-block; text-align: left; }
+.team-manage > summary { list-style: none; cursor: pointer; }
+.team-manage > summary::-webkit-details-marker { display: none; }
+.team-manage[open] { display: block; }
+.team-forms { display: grid; gap: 14px; margin-top: 12px; padding: 14px; border-radius: 14px; border: 1px solid var(--border); background: var(--panel-solid); min-width: min(560px, 80vw); }
+.team-forms form + form { padding-top: 14px; border-top: 1px dashed var(--border); }
+.team-forms .check { display: flex; gap: 8px; align-items: center; font-size: 13px; margin-top: 4px; }
+.team-edit-row > td { background: rgba(127, 127, 127, .04); padding: 16px 20px !important; }
+.team-edit-row .team-forms { margin: 0; min-width: 0; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: start; }
+.team-edit-row .team-forms form + form { padding-top: 0; border-top: 0; padding-left: 14px; border-left: 1px dashed var(--border); }
+.team-edit-row .form-grid { grid-template-columns: 1fr; }
+.team-edit-row .col-2 { grid-column: auto; }
+@media (max-width: 1100px) {
+  .team-edit-row .team-forms { grid-template-columns: 1fr; }
+  .team-edit-row .team-forms form + form { padding-left: 0; border-left: 0; padding-top: 14px; border-top: 1px dashed var(--border); }
+}
+.team-edit-row[hidden] { display: none !important; }
+.diag-more > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 6px; }
+.diag-more > summary::-webkit-details-marker { display: none; }
+.diag-more > summary::before { content: '▸'; transition: transform .2s; }
+.diag-more[open] > summary::before { transform: rotate(90deg); }
+.diag-cmds .secret-box { padding: 6px 8px 6px 12px; }

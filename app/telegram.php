@@ -101,6 +101,7 @@ function tg_notify_events(array $events): void
         foreach ($down as $ev) {
             $msgs[] = "🔴 <b>SERVER DOWN</b>\n\n" . tg_server_line($ev['server'])
                 . "\n⚠️ Reason: " . e($ev['error'])
+                . (($why = diagnose_short((string) $ev['error'], $ev['server'])) !== '' ? "\n💡 Likely: <b>" . e($why) . '</b> — open the server page for steps to verify' : '')
                 . "\n🕒 Down since: " . e(date('d M Y, h:i:s A', (int) $ev['since']))
                 . tg_footer();
         }

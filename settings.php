@@ -3,11 +3,44 @@ require __DIR__ . '/app/bootstrap.php';
 $user = require_login();
 $uid = (int) $user['id'];
 $tzList = timezone_identifiers_list();
+$isAdmin = can('admin');
+
+/** Team changes need the admin's own password again (5 wrong tries → logged out). */
+$confirmAdmin = function () use ($uid): void {
+    $fails = (int) ($_SESSION['sudo_fails'] ?? 0);
+    if ($fails >= 5) {
+        audit('reveal_locked', 'Too many wrong password confirmations on team changes — session ended');
+        logout_user();
+        redirect('login.php?expired=1');
+    }
+    if (!verify_current_password($uid, (string) ($_POST['admin_password'] ?? ''))) {
+        $_SESSION['sudo_fails'] = $fails + 1;
+        audit('password_change_failed', 'Wrong password confirmation on a team change');
+        usleep(400000);
+        throw new InvalidArgumentException('Your password is incorrect (' . (4 - $fails) . ' tries left). Nothing was changed.');
+    }
+    $_SESSION['sudo_fails'] = 0;
+};
+$validName = fn (string $n) => (bool) preg_match('/^[\p{L}\p{N}_.\- ]{3,32}$/u', $n);
+$activeAdmins = fn (int $exceptId) => (int) val("SELECT COUNT(*) FROM users WHERE role = 'admin' AND active = 1 AND id <> ?", [$exceptId]);
+$emailTaken = fn (string $email, int $exceptId) => (bool) val('SELECT id FROM users WHERE LOWER(email) = ? AND id <> ?', [strtolower($email), $exceptId]);
+$nameTaken = fn (string $name, int $exceptId) => (bool) val('SELECT id FROM users WHERE username = ? AND id <> ?', [$name, $exceptId]);
+$teamAlert = function (string $text): void {
+    if (tg_enabled()) {
+        tg_send("👥 <b>Team change</b>\n" . $text . "\n🌐 IP: <code>" . e(client_ip()) . "</code>\n🕒 " . e(date('d M Y, h:i:s A')));
+    }
+};
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     csrf_check();
     $section = post('section');
     $tab = $section;
+    if (in_array($section, ['general', 'telegram', 'security', 'user_add', 'user_update', 'user_reset', 'user_delete'], true)) {
+        require_perm('admin');
+    }
+    if (str_starts_with($section, 'user_')) {
+        $tab = 'team';
+    }
     try {
         switch ($section) {
             case 'general':
@@ -77,13 +110,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     audit('password_change_failed', 'Wrong current password');
                     throw new InvalidArgumentException('Current password is incorrect.');
                 }
-                $email = strtolower(post('email', '', 190));
+                // only an admin may change a login email (team members' emails are managed by the admin)
+                $email = $isAdmin ? strtolower(post('email', '', 190)) : strtolower((string) $user['email']);
                 if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
                     throw new InvalidArgumentException('Enter a valid login email address.');
                 }
+                if ($emailTaken($email, $uid)) {
+                    throw new InvalidArgumentException('Another account already uses that email.');
+                }
                 $newUser = post('username', $user['username'], 32);
-                if (!preg_match('/^[a-zA-Z0-9_.\-]{3,32}$/', $newUser)) {
-                    throw new InvalidArgumentException('Display name must be 3–32 characters (letters, numbers, _ . -).');
+                if (!$validName($newUser)) {
+                    throw new InvalidArgumentException('Display name must be 3–32 characters (letters, numbers, space, _ . -).');
+                }
+                if ($nameTaken($newUser, $uid)) {
+                    throw new InvalidArgumentException('Another team member already uses that name.');
+                }
+                if ((int) $user['must_change_pw'] && (string) ($_POST['new_password'] ?? '') === '') {
+                    throw new InvalidArgumentException('Please choose a new password (the one you received was temporary).');
                 }
                 $upd = ['username' => $newUser, 'email' => $email];
                 $changes = [];
@@ -97,8 +140,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     if ($new !== (string) ($_POST['new_password2'] ?? '')) {
                         throw new InvalidArgumentException('New passwords do not match.');
                     }
+                    if (password_verify($new, (string) val('SELECT password_hash FROM users WHERE id = ?', [$uid]))) {
+                        throw new InvalidArgumentException('The new password must be different from the current one.');
+                    }
                     $upd['password_hash'] = password_hash($new, password_algo());
+                    $upd['must_change_pw'] = 0;
                     $changes[] = 'password';
+                }
+                if ($changes) {
+                    // log out every other session of this account; keep this one
+                    $epoch = (int) val('SELECT session_epoch FROM users WHERE id = ?', [$uid]) + 1;
+                    $upd['session_epoch'] = $epoch;
+                    $_SESSION['epoch'] = $epoch;
                 }
                 db_update('users', $upd, 'id = ?', [$uid]);
                 session_regenerate_id(true);
@@ -156,6 +209,118 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 audit('settings_updated', 'Security settings');
                 flash('success', 'Security settings saved.');
                 break;
+
+            /* ---------------- team (admin only — checked above) ---------------- */
+            case 'user_add':
+                $confirmAdmin();
+                $name = trim(post('name', '', 32));
+                $email = strtolower(post('email', '', 190));
+                $role = post('role');
+                $pw = (string) ($_POST['password'] ?? '');
+                if (!$validName($name)) {
+                    throw new InvalidArgumentException('Name must be 3–32 characters (letters, numbers, space, _ . -).');
+                }
+                if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                    throw new InvalidArgumentException('Enter a valid email — it is their login.');
+                }
+                if (!isset(ROLES[$role])) {
+                    throw new InvalidArgumentException('Choose a role.');
+                }
+                if ($emailTaken($email, 0) || $nameTaken($name, 0)) {
+                    throw new InvalidArgumentException('A team member with that email or name already exists.');
+                }
+                if ($err = password_strength_error($pw)) {
+                    throw new InvalidArgumentException('Temporary password: ' . $err);
+                }
+                $newId = db_insert('users', [
+                    'username' => $name, 'email' => $email, 'password_hash' => password_hash($pw, password_algo()),
+                    'role' => $role, 'can_reveal' => $role === 'admin' || isset($_POST['can_reveal']) ? 1 : 0,
+                    'active' => 1, 'must_change_pw' => 1, 'session_epoch' => 0, 'totp_enabled' => 0,
+                    'created_by' => $uid, 'created_at' => time(),
+                ]);
+                audit('user_added', $name . ' <' . $email . '> as ' . ROLES[$role] . ' (id ' . $newId . ')');
+                $teamAlert('➕ Added <b>' . e($name) . '</b> (' . e($email) . ') as <b>' . e(ROLES[$role]) . '</b> by ' . e($user['username']));
+                flash('success', 'Added ' . $name . '. Share the email + temporary password privately — they must set their own password at first login.');
+                break;
+
+            case 'user_update':
+                $confirmAdmin();
+                $tid = (int) post('id');
+                $t = row('SELECT * FROM users WHERE id = ?', [$tid]);
+                if (!$t) {
+                    throw new InvalidArgumentException('User not found.');
+                }
+                if ($tid === $uid) {
+                    throw new InvalidArgumentException('Change your own account under “My account”. (You cannot remove your own admin rights.)');
+                }
+                $name = trim(post('name', '', 32));
+                $email = strtolower(post('email', '', 190));
+                $role = post('role');
+                $active = isset($_POST['active']) ? 1 : 0;
+                if (!$validName($name) || !filter_var($email, FILTER_VALIDATE_EMAIL) || !isset(ROLES[$role])) {
+                    throw new InvalidArgumentException('Check the name, email and role.');
+                }
+                if ($emailTaken($email, $tid) || $nameTaken($name, $tid)) {
+                    throw new InvalidArgumentException('Another team member already uses that email or name.');
+                }
+                if ($t['role'] === 'admin' && ($role !== 'admin' || !$active) && $activeAdmins($tid) < 1) {
+                    throw new InvalidArgumentException('There must always be at least one active admin.');
+                }
+                $upd = ['username' => $name, 'email' => $email, 'role' => $role, 'active' => $active,
+                        'can_reveal' => $role === 'admin' || isset($_POST['can_reveal']) ? 1 : 0];
+                $changed = [];
+                foreach (['email' => 'email', 'role' => 'role', 'active' => 'status', 'can_reveal' => 'root-password access'] as $k => $l) {
+                    if ((string) $t[$k] !== (string) $upd[$k]) {
+                        $changed[] = $l;
+                    }
+                }
+                if ($changed) {
+                    $upd['session_epoch'] = (int) $t['session_epoch'] + 1; // signs them out everywhere
+                }
+                db_update('users', $upd, 'id = ?', [$tid]);
+                audit('user_updated', $name . ' (id ' . $tid . ')' . ($changed ? ' — changed ' . implode(', ', $changed) : ''));
+                if ($changed) {
+                    $teamAlert('✏️ <b>' . e($name) . '</b>: changed ' . e(implode(', ', $changed)) . ' → ' . e(ROLES[$role]) . ($active ? '' : ' (DISABLED)') . ' by ' . e($user['username']));
+                }
+                flash('success', 'Saved ' . $name . ($changed ? ' — they were signed out and must log in again.' : '.'));
+                break;
+
+            case 'user_reset':
+                $confirmAdmin();
+                $tid = (int) post('id');
+                $t = row('SELECT * FROM users WHERE id = ?', [$tid]);
+                if (!$t || $tid === $uid) {
+                    throw new InvalidArgumentException($t ? 'Use “My account” to change your own password.' : 'User not found.');
+                }
+                $pw = (string) ($_POST['password'] ?? '');
+                if ($err = password_strength_error($pw)) {
+                    throw new InvalidArgumentException('Temporary password: ' . $err);
+                }
+                $upd = ['password_hash' => password_hash($pw, password_algo()), 'must_change_pw' => 1, 'session_epoch' => (int) $t['session_epoch'] + 1];
+                if (isset($_POST['reset_2fa'])) {
+                    $upd += ['totp_secret' => null, 'totp_enabled' => 0];
+                }
+                db_update('users', $upd, 'id = ?', [$tid]);
+                audit('user_password_reset', $t['username'] . ' (id ' . $tid . ')' . (isset($_POST['reset_2fa']) ? ' + 2FA reset' : ''));
+                $teamAlert('🔑 Password reset for <b>' . e($t['username']) . '</b>' . (isset($_POST['reset_2fa']) ? ' (2FA also reset)' : '') . ' by ' . e($user['username']));
+                flash('success', 'New temporary password set for ' . $t['username'] . '. They were signed out and must choose their own password at next login.');
+                break;
+
+            case 'user_delete':
+                $confirmAdmin();
+                $tid = (int) post('id');
+                $t = row('SELECT * FROM users WHERE id = ?', [$tid]);
+                if (!$t || $tid === $uid) {
+                    throw new InvalidArgumentException($t ? 'You cannot delete your own account.' : 'User not found.');
+                }
+                if ($t['role'] === 'admin' && $activeAdmins($tid) < 1) {
+                    throw new InvalidArgumentException('There must always be at least one active admin.');
+                }
+                q('DELETE FROM users WHERE id = ?', [$tid]);
+                audit('user_deleted', $t['username'] . ' <' . $t['email'] . '> (id ' . $tid . ')');
+                $teamAlert('🗑 Deleted <b>' . e($t['username']) . '</b> (' . e((string) $t['email']) . ') by ' . e($user['username']));
+                flash('success', 'Deleted ' . $t['username'] . '. Their activity stays in the log.');
+                break;
         }
     } catch (InvalidArgumentException $ex) {
         flash('error', $ex->getMessage());
@@ -176,17 +341,24 @@ $lastCron = (int) setting('last_cron_run', 0);
 $hasToken = setting('tg_token', '') !== '';
 $chk = fn ($k) => setting($k) === '1' ? 'checked' : '';
 
-layout_start('Settings', 'settings', 'Monitoring, Telegram alerts, security &amp; cron.');
+$team = $isAdmin ? rows('SELECT id, username, email, role, can_reveal, active, totp_enabled, must_change_pw, last_login_at, last_login_ip, created_at FROM users ORDER BY active DESC, role, username') : [];
+$suggestPw = 'Up' . bin2hex(random_bytes(5)) . '-' . random_int(10, 99) . 'X';
+
+layout_start($isAdmin ? 'Settings' : 'My account', 'settings', $isAdmin ? 'Monitoring, Telegram alerts, team, security &amp; cron.' : 'Your login, password and two-factor authentication.');
 ?>
 <div class="settings-layout">
   <nav class="tabs card glass" data-tabs>
+    <?php if ($isAdmin): ?>
     <a href="#general" data-tab="general"><?= icon('sliders') ?>General</a>
     <a href="#telegram" data-tab="telegram"><?= icon('send') ?>Telegram alerts</a>
-    <a href="#security" data-tab="security"><?= icon('shield') ?>Security</a>
-    <a href="#cron" data-tab="cron"><?= icon('terminal') ?>Cron &amp; system</a>
+    <a href="#team" data-tab="team"><?= icon('user') ?>Team</a>
+    <?php endif; ?>
+    <a href="#security" data-tab="security"><?= icon('shield') ?><?= $isAdmin ? 'Security' : 'My account' ?></a>
+    <?php if ($isAdmin): ?><a href="#cron" data-tab="cron"><?= icon('terminal') ?>Cron &amp; system</a><?php endif; ?>
   </nav>
 
   <div class="tab-panels">
+    <?php if ($isAdmin): ?>
     <!-- GENERAL -->
     <section class="tab-panel" id="tab-general">
       <form method="post" class="card glass">
@@ -254,8 +426,92 @@ layout_start('Settings', 'settings', 'Monitoring, Telegram alerts, security &amp
       </div>
     </section>
 
+    <!-- TEAM -->
+    <section class="tab-panel" id="tab-team">
+      <div class="card glass table-card">
+        <div class="card-head"><h3><?= icon('user') ?>Team members</h3><span class="muted small">Only admins can add people or change their email / role</span></div>
+        <div class="table-wrap">
+          <table class="table table-compact">
+            <thead><tr><th>Member</th><th>Role</th><th>Root passwords</th><th>2FA</th><th>Last login</th><th class="right">Manage</th></tr></thead>
+            <tbody>
+            <?php foreach ($team as $m): $self = (int) $m['id'] === $uid; ?>
+              <tr class="<?= (int) $m['active'] ? '' : 'row-dim' ?>">
+                <td><b><?= e($m['username']) ?></b><?= $self ? ' <span class="pill pill-up xs">You</span>' : '' ?><?= (int) $m['active'] ? '' : ' <span class="pill pill-down xs">Disabled</span>' ?><?= (int) $m['must_change_pw'] ? ' <span class="pill pill-warn xs" title="Has not set their own password yet">Temp password</span>' : '' ?>
+                  <div class="cell-sub mono"><?= e((string) $m['email']) ?></div></td>
+                <td><span class="pill xs <?= $m['role'] === 'admin' ? 'pill-host' : ($m['role'] === 'support' ? 'pill-up' : 'pill-unknown') ?>"><?= e(ROLES[$m['role']] ?? $m['role']) ?></span></td>
+                <td><?= $m['role'] === 'admin' || ($m['role'] === 'support' && (int) $m['can_reveal']) ? '<span class="txt-warn small">Can view</span>' : '<span class="muted small">No</span>' ?></td>
+                <td><?= (int) $m['totp_enabled'] ? '<span class="pill pill-up xs">On</span>' : '<span class="pill pill-warn xs">Off</span>' ?></td>
+                <td class="small"><?= $m['last_login_at'] ? e(fmt_time($m['last_login_at'], 'd M, h:i A')) . '<div class="cell-sub mono">' . e((string) $m['last_login_ip']) . '</div>' : '<span class="muted">Never</span>' ?></td>
+                <td class="right">
+                  <?php if ($self): ?><a class="link small" href="#security" data-tab-link="security">My account</a>
+                  <?php else: ?>
+                  <button class="btn btn-ghost xs" type="button" data-toggle-row="#team-edit-<?= (int) $m['id'] ?>"><?= icon('edit') ?>Manage</button>
+                  <?php endif; ?>
+                </td>
+              </tr>
+              <?php if (!$self): ?>
+              <tr class="team-edit-row" id="team-edit-<?= (int) $m['id'] ?>" hidden><td colspan="6">
+                    <div class="team-forms">
+                      <form method="post" class="form-grid" autocomplete="off">
+                        <?= csrf_field() ?><input type="hidden" name="section" value="user_update"><input type="hidden" name="id" value="<?= (int) $m['id'] ?>">
+                        <div class="field"><label>Name</label><input class="input" name="name" value="<?= e($m['username']) ?>" required></div>
+                        <div class="field"><label>Login email</label><input class="input" type="email" name="email" value="<?= e((string) $m['email']) ?>" required></div>
+                        <div class="field"><label>Role</label><select class="input" name="role"><?php foreach (ROLES as $rk => $rl): ?><option value="<?= $rk ?>" <?= $m['role'] === $rk ? 'selected' : '' ?>><?= e($rl) ?></option><?php endforeach; ?></select></div>
+                        <div class="field"><label>&nbsp;</label>
+                          <label class="check"><input type="checkbox" name="can_reveal" <?= (int) $m['can_reveal'] ? 'checked' : '' ?>> Can view root passwords (support)</label>
+                          <label class="check"><input type="checkbox" name="active" <?= (int) $m['active'] ? 'checked' : '' ?>> Account active</label></div>
+                        <div class="field col-2"><label>Your password <span class="muted small">(to confirm)</span></label><input class="input" type="password" name="admin_password" required autocomplete="current-password"></div>
+                        <div class="form-actions col-2"><button class="btn btn-primary sm" type="submit"><?= icon('check') ?>Save</button></div>
+                      </form>
+                      <form method="post" class="form-grid" autocomplete="off">
+                        <?= csrf_field() ?><input type="hidden" name="section" value="user_reset"><input type="hidden" name="id" value="<?= (int) $m['id'] ?>">
+                        <div class="field"><label>New temporary password</label><input class="input mono" name="password" value="<?= e('Up' . bin2hex(random_bytes(5)) . '-' . random_int(10, 99) . 'X') ?>" required></div>
+                        <div class="field"><label>&nbsp;</label><label class="check"><input type="checkbox" name="reset_2fa"> Also reset their 2FA (lost phone)</label></div>
+                        <div class="field col-2"><label>Your password <span class="muted small">(to confirm)</span></label><input class="input" type="password" name="admin_password" required autocomplete="current-password"></div>
+                        <div class="form-actions col-2"><button class="btn btn-ghost sm" type="submit"><?= icon('key') ?>Reset password</button></div>
+                      </form>
+                      <form method="post" class="form-grid" autocomplete="off" data-confirm="Delete <?= e($m['username']) ?>? They will not be able to log in. Their activity stays in the log.">
+                        <?= csrf_field() ?><input type="hidden" name="section" value="user_delete"><input type="hidden" name="id" value="<?= (int) $m['id'] ?>">
+                        <div class="field col-2"><label>Your password <span class="muted small">(to confirm)</span></label><input class="input" type="password" name="admin_password" required autocomplete="current-password"></div>
+                        <div class="form-actions col-2"><button class="btn btn-danger sm" type="submit"><?= icon('trash') ?>Delete member</button></div>
+                      </form>
+                    </div>
+              </td></tr>
+              <?php endif; ?>
+            <?php endforeach; ?>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <form method="post" class="card glass" autocomplete="off">
+        <?= csrf_field() ?><input type="hidden" name="section" value="user_add">
+        <div class="card-head"><h3><?= icon('plus') ?>Add team member</h3></div>
+        <div class="form-grid">
+          <div class="field"><label>Name</label><input class="input" name="name" required placeholder="Rahul Support" maxlength="32"></div>
+          <div class="field"><label>Login email</label><input class="input" type="email" name="email" required placeholder="rahul@company.com" autocomplete="off"></div>
+          <div class="field"><label>Role</label><select class="input" name="role"><option value="support" selected><?= e(ROLES['support']) ?></option><option value="viewer"><?= e(ROLES['viewer']) ?></option><option value="admin"><?= e(ROLES['admin']) ?></option></select></div>
+          <div class="field"><label>&nbsp;</label><label class="check"><input type="checkbox" name="can_reveal"> Can view root passwords</label></div>
+          <div class="field"><label>Temporary password <span class="muted small">(share privately)</span></label>
+            <div class="secret-box"><input class="input mono" name="password" value="<?= e($suggestPw) ?>" required><button class="icon-btn" type="button" data-copy="<?= e($suggestPw) ?>" title="Copy"><?= icon('copy') ?></button></div></div>
+          <div class="field"><label>Your password <span class="muted small">(to confirm)</span></label><input class="input" type="password" name="admin_password" required autocomplete="current-password"></div>
+        </div>
+        <ul class="sec-list">
+          <li><?= icon('check') ?><b>Support</b> — check servers, pause/resume, add &amp; edit servers, licenses and clients. Root passwords only if you tick the box (every view is logged). No settings, provider logins, deleting or team changes.</li>
+          <li><?= icon('check') ?><b>Viewer</b> — read-only dashboard, servers, licenses, clients and reports.</li>
+          <li><?= icon('check') ?><b>Admin</b> — everything, including this page.</li>
+          <li><?= icon('check') ?>They must set their own password at first login and can turn on 2FA. Only an admin can change their email. Changing role / email / status signs them out everywhere.</li>
+        </ul>
+        <div class="form-actions"><button class="btn btn-primary" type="submit"><?= icon('plus') ?>Add member</button></div>
+      </form>
+    </section>
+    <?php endif; ?>
+
     <!-- SECURITY -->
     <section class="tab-panel" id="tab-security">
+      <?php if ((int) $u['must_change_pw']): ?>
+        <div class="alert alert-warn"><?= icon('alert') ?>Your password was set by the admin. Choose your own password below (and turn on 2FA) to continue.</div>
+      <?php endif; ?>
       <div class="card glass">
         <div class="card-head"><h3><?= icon('smartphone') ?>Two-factor authentication</h3>
           <?= (int) $u['totp_enabled'] ? '<span class="pill pill-up">' . icon('check') . 'Enabled</span>' : '<span class="pill pill-warn">Not enabled</span>' ?></div>
@@ -289,7 +545,7 @@ layout_start('Settings', 'settings', 'Monitoring, Telegram alerts, security &amp
         <?= csrf_field() ?><input type="hidden" name="section" value="password">
         <div class="card-head"><h3><?= icon('lock') ?>Login credentials</h3></div>
         <div class="form-grid">
-          <div class="field"><label>Login email</label><input class="input" type="email" name="email" value="<?= e((string) ($u['email'] ?? '')) ?>" placeholder="you@company.com" required autocomplete="username"></div>
+          <div class="field"><label>Login email<?= $isAdmin ? '' : ' <span class="muted small">(only the admin can change it)</span>' ?></label><input class="input" type="email" name="email" value="<?= e((string) ($u['email'] ?? '')) ?>" placeholder="you@company.com" required autocomplete="username" <?= $isAdmin ? '' : 'readonly' ?>></div>
           <div class="field"><label>Display name</label><input class="input" name="username" value="<?= e($u['username']) ?>" required></div>
           <div class="field col-2"><label>Current password <span class="muted small">(required to save any change)</span></label><input class="input" type="password" name="current_password" required autocomplete="current-password"></div>
           <div class="field"><label>New password <span class="muted small">(leave blank to keep)</span></label><input class="input" type="password" name="new_password" autocomplete="new-password" data-strength></div>
@@ -299,6 +555,7 @@ layout_start('Settings', 'settings', 'Monitoring, Telegram alerts, security &amp
         <div class="form-actions"><button class="btn btn-primary" type="submit"><?= icon('check') ?>Update credentials</button></div>
       </form>
 
+      <?php if ($isAdmin): ?>
       <form method="post" class="card glass">
         <?= csrf_field() ?><input type="hidden" name="section" value="security">
         <div class="card-head"><h3><?= icon('shield') ?>Access control</h3></div>
@@ -317,8 +574,10 @@ layout_start('Settings', 'settings', 'Monitoring, Telegram alerts, security &amp
         </ul>
         <div class="form-actions"><button class="btn btn-primary" type="submit"><?= icon('check') ?>Save</button></div>
       </form>
+      <?php endif; ?>
     </section>
 
+    <?php if ($isAdmin): ?>
     <!-- CRON -->
     <section class="tab-panel" id="tab-cron">
       <div class="card glass">
@@ -343,6 +602,7 @@ layout_start('Settings', 'settings', 'Monitoring, Telegram alerts, security &amp
         </dl>
       </div>
     </section>
+    <?php endif; ?>
   </div>
 </div>
 <?php layout_end('<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" referrerpolicy="no-referrer"></script>');

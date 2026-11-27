@@ -1,6 +1,7 @@
 <?php
 require __DIR__ . '/app/bootstrap.php';
 $user = require_login();
+require_perm('admin');
 
 $id = (int) ($_GET['id'] ?? ($_POST['id'] ?? 0));
 $p = row('SELECT * FROM providers WHERE id = ?', [$id]);

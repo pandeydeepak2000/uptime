@@ -36,6 +36,7 @@ try {
             if (!$isPost) {
                 json_out(['ok' => false], 405);
             }
+            require_perm('edit', true);
             $id = (int) ($_POST['id'] ?? 0);
             $s = row('SELECT id, name, enabled FROM servers WHERE id = ?', [$id]);
             if (!$s) {
@@ -67,10 +68,12 @@ try {
             $type = (string) ($_POST['type'] ?? '');
             $id = (int) ($_POST['id'] ?? 0);
             if ($type === 'server') {
+                require_perm('reveal', true);
                 $r = row('SELECT name, ssh_user, ssh_pass FROM servers WHERE id = ?', [$id]);
                 $val = $r ? decrypt_str($r['ssh_pass']) : '';
                 $label = $r ? $r['name'] . ' (' . ($r['ssh_user'] ?: 'root') . ')' : '';
             } elseif ($type === 'provider') {
+                require_perm('admin', true);
                 $r = row('SELECT name, account_pass FROM providers WHERE id = ?', [$id]);
                 $val = $r ? decrypt_str($r['account_pass']) : '';
                 $label = $r ? $r['name'] . ' panel' : '';
@@ -87,6 +90,7 @@ try {
             if (!$isPost) {
                 json_out(['ok' => false], 405);
             }
+            require_perm('edit', true);
             // throttle: max 12 discoveries per 10 minutes per session
             $hist = array_values(array_filter((array) ($_SESSION['discover_hist'] ?? []), fn ($t) => $t > time() - 600));
             if (count($hist) >= 12) {
@@ -131,6 +135,7 @@ try {
             if (!$isPost) {
                 json_out(['ok' => false], 405);
             }
+            require_perm('admin', true);
             $hist = array_values(array_filter((array) ($_SESSION['sync_hist'] ?? []), fn ($t) => $t > time() - 3600));
             if (count($hist) >= 6) {
                 json_out(['ok' => false, 'error' => 'Max 6 manual syncs per hour — please wait.'], 429);
@@ -146,6 +151,7 @@ try {
             if (!$isPost) {
                 json_out(['ok' => false], 405);
             }
+            require_perm('edit', true);
             if ($action === 'service_monitor') {
                 $ids = [(int) ($_POST['id'] ?? 0)];
             } else {
@@ -170,6 +176,7 @@ try {
             if (!$isPost) {
                 json_out(['ok' => false], 405);
             }
+            require_perm('admin', true);
             $list = renewal_due_list(true);
             if (!$list) {
                 json_out(['ok' => true, 'message' => 'No renewals due in the next ' . max(renewal_days_list()) . ' days.']);
@@ -181,6 +188,7 @@ try {
             if (!$isPost) {
                 json_out(['ok' => false], 405);
             }
+            require_perm('admin', true);
             $res = tg_send("✅ <b>Test notification</b>\n\nTelegram alerts are working for <b>" . e(app_name()) . "</b>.\n🕒 " . e(date('d M Y, h:i:s A')) . tg_footer());
             json_out(['ok' => $res['ok'], 'message' => $res['ok'] ? 'Test message sent to Telegram' : 'Failed: ' . $res['error']]);
 
@@ -188,6 +196,7 @@ try {
             if (!$isPost) {
                 json_out(['ok' => false], 405);
             }
+            require_perm('edit', true);
             [$from, $to, $label] = report_range((string) ($_POST['range'] ?? 'today'), (string) ($_POST['from'] ?? ''), (string) ($_POST['to'] ?? ''));
             $res = tg_send(tg_report_text(build_report($from, $to), 'Uptime Report — ' . $label));
             audit('report_sent', 'Telegram report: ' . $label);

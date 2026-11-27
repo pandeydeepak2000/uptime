@@ -1,10 +1,11 @@
 <?php
 require __DIR__ . '/app/bootstrap.php';
 $user = require_login();
+require_perm('admin');
 
 $filter = get_param('type');
 $groups = [
-    'security'   => ['login', 'logout', 'login_failed', '2fa_failed', '2fa_enabled', '2fa_disabled', 'password_changed', 'password_change_failed', 'secret_revealed', 'reveal_failed', 'reveal_locked'],
+    'security'   => ['login', 'logout', 'login_failed', '2fa_failed', '2fa_enabled', '2fa_disabled', 'password_changed', 'password_change_failed', 'secret_revealed', 'reveal_failed', 'reveal_locked', 'user_added', 'user_updated', 'user_deleted', 'user_password_reset', 'access_denied'],
     'monitoring' => ['server_down', 'server_up', 'server_pause', 'server_resume'],
     'changes'    => ['server_added', 'server_updated', 'server_deleted', 'provider_added', 'provider_updated', 'provider_deleted', 'settings_updated', 'report_sent', 'report_exported', 'server_renewed', 'server_discover', 'provider_sync', 'service_added', 'service_updated', 'service_deleted'],
 ];
@@ -17,7 +18,7 @@ if (isset($groups[$filter])) {
 $logs = rows($sql . ' ORDER BY a.id DESC LIMIT 300', $params);
 
 $style = function (string $a): array {
-    if (in_array($a, ['login_failed', '2fa_failed', 'reveal_failed', 'reveal_locked', 'server_down', 'server_deleted', 'password_change_failed', 'provider_deleted'], true)) {
+    if (in_array($a, ['login_failed', '2fa_failed', 'reveal_failed', 'reveal_locked', 'access_denied', 'user_deleted', 'server_down', 'server_deleted', 'password_change_failed', 'provider_deleted'], true)) {
         return ['down', 'alert'];
     }
     if (in_array($a, ['secret_revealed', 'server_pause', '2fa_disabled'], true)) {

@@ -109,7 +109,7 @@ layout_start('Reports', 'reports', 'Uptime & downtime report · <b>' . e($label)
   <?php endif; ?>
 </section>
 
-<section class="card glass table-card anim-in">
+<section class="card glass table-card anim-in" id="downtime">
   <div class="card-head"><h3><?= icon('zap') ?>Downtime log</h3><span class="muted small"><?= count($rep['incidents']) ?> incident(s) in period</span></div>
   <?php if (!$rep['incidents']): ?>
     <div class="mini-empty"><?= icon('check') ?>No downtime in this period. 🎉</div>
@@ -125,7 +125,7 @@ layout_start('Reports', 'reports', 'Uptime & downtime report · <b>' . e($label)
           <td><?= e(fmt_time($i['started_at'], 'd M, h:i:s A')) ?></td>
           <td><?= $open ? '<span class="pill pill-down xs"><span class="dot dot-down"></span>Still down</span>' : e(fmt_time($i['ended_at'], 'd M, h:i:s A')) ?></td>
           <td><b class="txt-bad" <?= $open ? 'data-since="' . (int) $i['started_at'] . '"' : '' ?>><?= e(fmt_duration($open ? time() - (int) $i['started_at'] : (int) $i['duration'], 3)) ?></b></td>
-          <td class="mono small muted"><?= e((string) $i['cause']) ?></td>
+          <td><?php $why = diagnose_short((string) $i['cause'], ['host' => $i['host']]); ?><?= $why ? '<b class="small">' . e($why) . '</b>' : '' ?><div class="mono small muted"><?= e((string) $i['cause']) ?></div></td>
         </tr>
       <?php endforeach; ?>
       </tbody>

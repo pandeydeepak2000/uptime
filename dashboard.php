@@ -89,22 +89,22 @@ layout_start(
   </div>
 
   <div class="stat-grid">
-    <div class="card glass stat anim-in" style="--d:.05s">
+    <a class="card glass stat anim-in" style="--d:.05s" href="<?= e(url('servers.php')) ?>" title="Open all servers">
       <div class="stat-ico ico-violet"><?= icon('server') ?></div>
       <div><span class="stat-lbl">Total servers</span><b class="stat-val" data-count="<?= $t['servers'] ?>" data-sum="total">0</b></div>
-    </div>
-    <div class="card glass stat anim-in" style="--d:.1s">
+    </a>
+    <a class="card glass stat anim-in" style="--d:.1s" href="<?= e(url('servers.php?status=up')) ?>" title="Show online servers">
       <div class="stat-ico ico-green"><?= icon('up') ?></div>
       <div><span class="stat-lbl">Online</span><b class="stat-val txt-good" data-count="<?= $t['up'] ?>" data-sum="up">0</b></div>
-    </div>
-    <div class="card glass stat anim-in <?= $t['down'] ? 'stat-alert' : '' ?>" style="--d:.15s">
+    </a>
+    <a class="card glass stat anim-in <?= $t['down'] ? 'stat-alert' : '' ?>" style="--d:.15s" href="<?= e(url('servers.php?status=down')) ?>" title="Show offline servers">
       <div class="stat-ico ico-red"><?= icon('down') ?></div>
       <div><span class="stat-lbl">Offline</span><b class="stat-val txt-bad" data-count="<?= $t['down'] ?>" data-sum="down">0</b></div>
-    </div>
-    <div class="card glass stat anim-in" style="--d:.2s">
+    </a>
+    <a class="card glass stat anim-in" style="--d:.2s" href="<?= e(url('reports.php?range=24h#downtime')) ?>" title="See every outage of the last 24 hours with its reason">
       <div class="stat-ico ico-amber"><?= icon('zap') ?></div>
       <div><span class="stat-lbl">Incidents (24h)</span><b class="stat-val" data-count="<?= $incidents24 ?>">0</b></div>
-    </div>
+    </a>
   </div>
 </section>
 
@@ -121,7 +121,7 @@ layout_start(
         <div class="down-main"><b><?= e($s['name']) ?></b><span class="mono muted"><?= e($s['host']) ?></span></div>
         <?= provider_badge($s['provider_name'], $s['provider_color']) ?>
         <div class="down-time"><span class="lbl">Down for</span><b data-since="<?= (int) $s['status_since'] ?>"><?= e(fmt_duration(time() - (int) $s['status_since'])) ?></b></div>
-        <div class="down-err muted small"><?= e((string) $s['last_error']) ?></div>
+        <div class="down-err muted small"><?php $why = diagnose_short((string) $s['last_error'], $s); ?><?= $why ? '<b>' . e($why) . '</b> · ' : '' ?><?= e((string) $s['last_error']) ?></div>
       </a>
     <?php endforeach; ?>
   </div>
@@ -140,7 +140,7 @@ layout_start(
     <option value="">All providers</option>
     <?php foreach ($providers as $p): ?><option value="<?= (int) $p['id'] ?>"><?= e($p['name']) ?></option><?php endforeach; ?>
   </select>
-  <a class="btn btn-ghost" href="<?= e(url('server_edit.php')) ?>"><?= icon('plus') ?><span class="hide-sm">Add server</span></a>
+  <?php if (can('edit')): ?><a class="btn btn-ghost" href="<?= e(url('server_edit.php')) ?>"><?= icon('plus') ?><span class="hide-sm">Add server</span></a><?php endif; ?>
 </section>
 
 <section class="server-grid" id="serverGrid">
@@ -186,7 +186,7 @@ layout_start(
         <span class="muted small" title="<?= e((string) $s['last_error']) ?>"><?= icon('clock') ?>Checked <span data-role="checked" <?= $s['last_check_at'] ? 'data-ago="' . (int) $s['last_check_at'] . '"' : '' ?>><?= e(time_ago($s['last_check_at'])) ?></span></span>
         <div class="srv-actions">
           <button class="icon-btn sm" type="button" data-check="<?= $id ?>" title="Check now"><?= icon('refresh') ?></button>
-          <a class="icon-btn sm" href="<?= e(url('server_edit.php?id=' . $id)) ?>" title="Edit"><?= icon('edit') ?></a>
+          <?php if (can('edit')): ?><a class="icon-btn sm" href="<?= e(url('server_edit.php?id=' . $id)) ?>" title="Edit"><?= icon('edit') ?></a><?php endif; ?>
           <a class="icon-btn sm" href="<?= e(url('server.php?id=' . $id)) ?>" title="Details"><?= icon('external') ?></a>
         </div>
       </div>

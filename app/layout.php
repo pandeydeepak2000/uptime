@@ -86,11 +86,11 @@ function layout_start(string $title, string $active = '', string $subtitle = '',
     <?= nav_link('clients.php', 'user', 'Clients & Billing', 'clients', $active) ?>
     <?= nav_link('reports.php', 'report', 'Reports', 'reports', $active) ?>
     <div class="nav-label">System</div>
-    <?= nav_link('settings.php', 'sliders', 'Settings', 'settings', $active) ?>
-    <?= nav_link('activity.php', 'list', 'Activity Log', 'activity', $active) ?>
+    <?= nav_link('settings.php', 'sliders', can('admin') ? 'Settings & Team' : 'My account', 'settings', $active) ?>
+    <?php if (can('admin')): ?><?= nav_link('activity.php', 'list', 'Activity Log', 'activity', $active) ?><?php endif; ?>
   </nav>
   <div class="sidebar-foot">
-    <a class="sys-card cron-<?= $cronState ?>" href="<?= e(url('settings.php#cron')) ?>" title="Background checker (cron)">
+    <a class="sys-card cron-<?= $cronState ?>" href="<?= e(url(can('admin') ? 'settings.php#cron' : 'dashboard.php')) ?>" title="Background checker (cron)">
       <span class="sys-dot"></span>
       <div>
         <div class="sys-title"><?= $cronState === 'ok' ? 'Monitoring active' : ($cronState === 'late' ? 'Cron delayed' : 'Cron not configured') ?></div>
@@ -99,7 +99,7 @@ function layout_start(string $title, string $active = '', string $subtitle = '',
     </a>
     <div class="user-chip">
       <div class="avatar"><?= e(initials($user['username'])) ?></div>
-      <div class="user-meta"><div class="user-name"><?= e($user['username']) ?></div><div class="user-role"><?= (int) $user['totp_enabled'] ? 'Admin · 2FA on' : 'Administrator' ?></div></div>
+      <div class="user-meta"><div class="user-name"><?= e($user['username']) ?></div><div class="user-role"><?= e(role_label($user)) ?><?= (int) $user['totp_enabled'] ? ' · 2FA on' : '' ?></div></div>
       <form method="post" action="<?= e(url('logout.php')) ?>"><?= csrf_field() ?><button class="icon-btn" title="Log out" type="submit"><?= icon('logout') ?></button></form>
     </div>
   </div>

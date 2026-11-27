@@ -26,7 +26,7 @@ foreach (billing_items() as $it) {
 }
 
 layout_start('Providers', 'providers', 'Hosting companies and their client-area logins.',
-    '<a class="btn btn-ghost" href="' . e(url('provider_edit.php')) . '">' . icon('plus') . '<span class="hide-sm">Add provider</span></a>');
+    can('admin') ? '<a class="btn btn-ghost" href="' . e(url('provider_edit.php')) . '">' . icon('plus') . '<span class="hide-sm">Add provider</span></a>' : '');
 ?>
 <?php if (!$providers): ?>
   <div class="card glass"><?= empty_state('building', 'No providers', 'Add EricHost, ServerBroker, Servica or any other host.', '<a class="btn btn-primary" href="' . e(url('provider_edit.php')) . '">' . icon('plus') . 'Add provider</a>') ?></div>
@@ -47,7 +47,7 @@ layout_start('Providers', 'providers', 'Hosting companies and their client-area 
           <?php if ($p['website']): ?><a class="link small" href="<?= e($p['website']) ?>" target="_blank" rel="noopener noreferrer"><?= e(preg_replace('~^https?://~', '', $p['website'])) ?> ↗</a><?php else: ?><span class="muted small">No website</span><?php endif; ?>
         </div>
         <div class="prov-actions">
-          <a class="icon-btn sm" href="<?= e(url('provider_edit.php?id=' . $pid)) ?>" title="Edit"><?= icon('edit') ?></a>
+          <?php if (can('admin')): ?><a class="icon-btn sm" href="<?= e(url('provider_edit.php?id=' . $pid)) ?>" title="Edit"><?= icon('edit') ?></a><?php endif; ?>
         </div>
       </div>
       <div class="prov-stats">
@@ -60,7 +60,7 @@ layout_start('Providers', 'providers', 'Hosting companies and their client-area 
       <dl class="kv compact">
         <dt>Client area</dt><dd><?= $p['panel_url'] ? '<a class="link" href="' . e($p['panel_url']) . '" target="_blank" rel="noopener noreferrer">Open panel ↗</a>' : '—' ?></dd>
         <dt>Login</dt><dd><?php if ($p['account_user']): ?><span class="mono"><?= e($p['account_user']) ?></span><button class="copy-btn" type="button" data-copy="<?= e($p['account_user']) ?>"><?= icon('copy') ?></button><?php else: ?>—<?php endif; ?>
-          <?php if ($p['account_pass']): ?><button class="btn btn-ghost xs" type="button" data-reveal="provider" data-id="<?= $pid ?>" data-label="<?= e($p['name']) ?> panel"><?= icon('key') ?>Password</button><?php endif; ?></dd>
+          <?php if ($p['account_pass'] && can('admin')): ?><button class="btn btn-ghost xs" type="button" data-reveal="provider" data-id="<?= $pid ?>" data-label="<?= e($p['name']) ?> panel"><?= icon('key') ?>Password</button><?php endif; ?></dd>
         <dt>Support</dt><dd><?= $p['support_email'] ? '<span class="mono small">' . e($p['support_email']) . '</span>' : '—' ?></dd>
         <?php $its = $byProv[$pid] ?? []; $noPrice = items_unpriced($its); ?>
         <dt>Monthly</dt><dd><b><?= e(money_fmt(money_totals($its))) ?></b>
@@ -75,17 +75,19 @@ layout_start('Providers', 'providers', 'Hosting companies and their client-area 
         <p class="small sync-status"><?= $p['last_sync_at'] ? e((string) $p['last_sync_status']) . ' <span class="muted">· <span data-ago="' . (int) $p['last_sync_at'] . '">' . e(time_ago($p['last_sync_at'])) . '</span></span>' : '<span class="muted">Never synced. Works with WHMCS client areas (no CAPTCHA / 2FA).</span>' ?></p>
         <div class="sync-trace" hidden></div>
         <div class="row-gap">
+          <?php if (can('admin')): ?>
           <button class="btn btn-ghost sm" type="button" data-sync-provider="<?= $pid ?>" <?= (($p['api_type'] ?? '') === 'ovh' ? $p['api_config'] : ($p['account_pass'] && $p['panel_url'])) ? '' : 'disabled title="Save the login (or OVH API keys) in Edit first"' ?>><?= icon('refresh') ?>Sync now</button>
           <a class="btn btn-ghost sm" href="<?= e(url('provider_import.php?id=' . $pid)) ?>" title="For providers with CAPTCHA / 2FA"><?= icon('download') ?>Import saved page</a>
+          <?php endif; ?>
         </div>
       </div>
       <div class="prov-foot">
         <a class="btn btn-ghost sm" href="<?= e(url('servers.php')) ?>"><?= icon('server') ?>Servers</a>
-        <a class="btn btn-ghost sm" href="<?= e(url('server_edit.php?provider=' . $pid)) ?>"><?= icon('plus') ?>Add server</a>
+        <?php if (can('edit')): ?><a class="btn btn-ghost sm" href="<?= e(url('server_edit.php?provider=' . $pid)) ?>"><?= icon('plus') ?>Add server</a><?php endif; ?>
       </div>
     </article>
   <?php endforeach; ?>
-  <a class="card prov-add anim-in" href="<?= e(url('provider_edit.php')) ?>"><?= icon('plus') ?><span>Add provider</span></a>
+  <?php if (can('admin')): ?><a class="card prov-add anim-in" href="<?= e(url('provider_edit.php')) ?>"><?= icon('plus') ?><span>Add provider</span></a><?php endif; ?>
 </section>
 <?php endif; ?>
 <?php layout_end();

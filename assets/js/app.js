@@ -662,3 +662,19 @@
     sync();
   });
 })();
+
+/* ?status=up|down|paused in the URL pre-selects that filter chip (links from the dashboard cards). */
+window.addEventListener('load', function () {
+  var st = new URLSearchParams(location.search).get('status');
+  if (!st || !/^[a-z]+$/.test(st)) return;
+  var chip = document.querySelector('[data-filter-chips]:not([data-filter-key]) .chip[data-status="' + st + '"]');
+  if (chip) chip.click();
+});
+
+/* Team page: "Manage" opens that member's edit row. */
+document.addEventListener('click', function (e) {
+  var b = e.target.closest('[data-toggle-row]');
+  if (!b) return;
+  var row = document.querySelector(b.getAttribute('data-toggle-row'));
+  if (row) row.hidden = !row.hidden;
+});

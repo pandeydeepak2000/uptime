@@ -27,8 +27,10 @@ $canMonitor = fn ($s) => $s['kind'] === 'vps' && !$s['server_id'] && ($s['ip'] |
     && in_array(strtolower((string) ($s['status'] ?: 'active')), ['active', 'suspended'], true);
 $unmonitored = count(array_filter($list, $canMonitor));
 
+$hiddenCount = can('admin') ? (int) val('SELECT COUNT(*) FROM ignored_services') : 0;
 layout_start('Services & Licenses', 'services', 'Everything you pay for — synced from provider client areas or added by hand.',
-    '<a class="btn btn-ghost" href="' . e(url('service_edit.php')) . '">' . icon('plus') . '<span class="hide-sm">Add license</span></a>');
+    ($hiddenCount ? '<form method="post" action="' . e(url('service_edit.php')) . '" class="inline" data-confirm="Bring back the ' . $hiddenCount . ' synced service(s) you deleted? They return on the next sync / import.">' . csrf_field() . '<input type="hidden" name="action" value="restore_hidden"><button class="btn btn-ghost" type="submit" title="Synced services you deleted">' . icon('refresh') . '<span class="hide-sm">Restore deleted (' . $hiddenCount . ')</span></button></form>' : '')
+    . (can('edit') ? '<a class="btn btn-ghost" href="' . e(url('service_edit.php')) . '">' . icon('plus') . '<span class="hide-sm">Add license</span></a>' : ''));
 ?>
 <section class="report-stats">
   <div class="card glass stat anim-in"><div class="stat-ico ico-violet"><?= icon('list') ?></div><div><span class="stat-lbl">Total</span><b class="stat-val"><?= $counts['all'] ?></b></div></div>
@@ -104,11 +106,11 @@ layout_start('Services & Licenses', 'services', 'Everything you pay for — sync
             <?php else: ?>—<?php endif; ?>
           </td>
           <td class="right nowrap sticky-col">
-            <?php if ($canMonitor($s)): ?><button class="btn btn-ghost xs" type="button" data-monitor-service="<?= (int) $s['id'] ?>" title="Add this VPS to uptime monitoring"><?= icon('plus') ?>Monitor</button><?php endif; ?>
+            <?php if ($canMonitor($s) && can('edit')): ?><button class="btn btn-ghost xs" type="button" data-monitor-service="<?= (int) $s['id'] ?>" title="Add this VPS to uptime monitoring"><?= icon('plus') ?>Monitor</button><?php endif; ?>
             <?php if ($s['panel_url']): ?><a class="icon-btn sm" href="<?= e($s['panel_url']) ?>" target="_blank" rel="noopener noreferrer" title="Open client area"><?= icon('external') ?></a><?php endif; ?>
-            <a class="icon-btn sm" href="<?= e(url('service_edit.php?id=' . (int) $s['id'])) ?>" title="Edit"><?= icon('edit') ?></a>
-            <?php if ($s['source'] === 'manual'): ?>
-              <form method="post" action="<?= e(url('service_edit.php')) ?>" class="inline" data-confirm="Delete <?= e($s['name']) ?>?">
+            <?php if (can('edit')): ?><a class="icon-btn sm" href="<?= e(url('service_edit.php?id=' . (int) $s['id'])) ?>" title="Edit"><?= icon('edit') ?></a><?php endif; ?>
+            <?php if (can('admin')): ?>
+              <form method="post" action="<?= e(url('service_edit.php')) ?>" class="inline" data-confirm="Delete <?= e($s['name']) ?>?<?= $s['source'] !== 'manual' ? ' It is synced from ' . e((string) $s['provider_name']) . ' — it will be hidden from future syncs (it is NOT cancelled at the provider).' : '' ?>">
                 <?= csrf_field() ?><input type="hidden" name="action" value="delete"><input type="hidden" name="id" value="<?= (int) $s['id'] ?>">
                 <button class="icon-btn sm danger" type="submit" title="Delete"><?= icon('trash') ?></button>
               </form>

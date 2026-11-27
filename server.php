@@ -20,6 +20,13 @@ $bars = uptime_days(90, $id)[$id] ?? [];
 $incidents = rows('SELECT * FROM incidents WHERE server_id = ? ORDER BY started_at DESC LIMIT 50', [$id]);
 $services = rows('SELECT ps.*, p.name AS provider_name FROM provider_services ps LEFT JOIN providers p ON p.id = ps.provider_id WHERE ps.server_id = ? ORDER BY ps.kind, ps.name', [$id]);
 $isHosting = (bool) array_filter($services, fn ($sv) => $sv['kind'] === 'reseller');
+$flaps = (int) val('SELECT COUNT(*) FROM incidents WHERE server_id = ? AND started_at >= ?', [$id, time() - 86400]);
+$diag = null;
+if ($m['status'] === 'down') {
+    $diag = [diagnose((string) $s['last_error'], $s, $flaps, $services), 'Why is it down?', (string) $s['last_error']];
+} elseif ($flaps > 0 && !empty($incidents[0]['cause'])) {
+    $diag = [diagnose((string) $incidents[0]['cause'], $s, $flaps, $services), $flaps . ' outage' . ($flaps > 1 ? 's' : '') . ' in the last 24h — last reason', (string) $incidents[0]['cause']];
+}
 $client = $s['client_id'] ? row('SELECT * FROM clients WHERE id = ?', [(int) $s['client_id']]) : null;
 
 // response-time chart: last 24h, bucketed to 5 minutes
@@ -41,7 +48,7 @@ foreach ($buckets as $t => $b) {
 }
 $sshCmd = 'ssh ' . ($s['ssh_user'] ?: 'root') . '@' . $s['host'] . ((int) $s['ssh_port'] !== 22 ? ' -p ' . (int) $s['ssh_port'] : '');
 
-$actions = '<a class="btn btn-ghost" href="' . e(url('server_edit.php?id=' . $id)) . '">' . icon('edit') . '<span class="hide-sm">Edit</span></a>'
+$actions = (can('edit') ? '<a class="btn btn-ghost" href="' . e(url('server_edit.php?id=' . $id)) . '">' . icon('edit') . '<span class="hide-sm">Edit</span></a>' : '')
     . '<button class="btn btn-ghost" type="button" data-check="' . $id . '">' . icon('refresh') . '<span class="hide-sm">Check now</span></button>';
 layout_start($s['name'], 'servers', '<span class="mono">' . e($s['host']) . '</span> · ' . e($s['provider_name'] ?? 'No provider')
     . ' · ' . kind_pill($isHosting ? 'reseller' : 'vps', false) . ' · ' . client_badge($client), $actions);
@@ -64,6 +71,8 @@ layout_start($s['name'], 'servers', '<span class="mono">' . e($s['host']) . '</s
     <?php endforeach; ?>
   </div>
 </section>
+
+<?= $diag ? diagnose_card($diag[0], $diag[1], $diag[2]) : '' ?>
 
 <section class="card glass anim-in" style="--d:.05s">
   <div class="card-head">
@@ -96,7 +105,7 @@ layout_start($s['name'], 'servers', '<span class="mono">' . e($s['host']) . '</s
       <dt>Host key</dt><dd><?= $s['ssh_fingerprint'] ? '<span class="mono small" title="Saved SSH host key fingerprint — auto-detect refuses to send the password if it changes">' . e($s['ssh_fingerprint']) . '</span>' : '<span class="muted small">Not verified yet — run Auto-detect in Edit</span>' ?></dd>
       <?php endif; ?>
       <dt>Password</dt><dd><?php if ($s['ssh_pass']): ?><span class="mono">••••••••••••</span>
-        <button class="btn btn-ghost xs" type="button" data-reveal="server" data-id="<?= $id ?>" data-label="<?= e($s['name']) ?>"><?= icon('eye') ?>Reveal</button><?php else: ?><span class="muted">Not saved</span><?php endif; ?></dd>
+        <?php if (can('reveal')): ?><button class="btn btn-ghost xs" type="button" data-reveal="server" data-id="<?= $id ?>" data-label="<?= e($s['name']) ?>"><?= icon('eye') ?>Reveal</button><?php else: ?><span class="muted small">(admin can view)</span><?php endif; ?><?php else: ?><span class="muted">Not saved</span><?php endif; ?></dd>
     </dl>
     <?php if (!$isHosting): ?>
     <div class="secret-box"><code><?= e($sshCmd) ?></code><button class="icon-btn" type="button" data-copy="<?= e($sshCmd) ?>" title="Copy SSH command"><?= icon('copy') ?></button></div>
@@ -108,7 +117,7 @@ layout_start($s['name'], 'servers', '<span class="mono">' . e($s['host']) . '</s
     <dl class="kv">
       <dt>Provider</dt><dd><?= provider_badge($s['provider_name'], $s['provider_color']) ?>
         <?php if ($s['panel_url']): ?><a class="link small" href="<?= e($s['panel_url']) ?>" target="_blank" rel="noopener noreferrer">Panel ↗</a><?php endif; ?></dd>
-      <dt>Used by</dt><dd><a href="<?= e(url('clients.php?id=' . ($client ? (int) $client['id'] : 'own'))) ?>"><?= client_badge($client) ?></a> <a class="link small" href="<?= e(url('server_edit.php?id=' . $id)) ?>">change</a></dd>
+      <dt>Used by</dt><dd><a href="<?= e(url('clients.php?id=' . ($client ? (int) $client['id'] : 'own'))) ?>"><?= client_badge($client) ?></a><?php if (can('edit')): ?> <a class="link small" href="<?= e(url('server_edit.php?id=' . $id)) ?>">change</a><?php endif; ?></dd>
       <dt>Check method</dt><dd><?= e(CHECK_TYPES[$s['check_type']] ?? $s['check_type']) ?><?= $s['check_type'] === 'tcp' ? ' · port ' . (int) $s['port'] : '' ?><?= $s['check_type'] === 'http' ? ' · ' . e($s['url']) : '' ?></dd>
       <dt>Location</dt><dd><?= e($s['location'] ?: '—') ?></dd>
       <dt>OS</dt><dd><?= e($s['os'] ?: '—') ?></dd>
@@ -122,6 +131,7 @@ layout_start($s['name'], 'servers', '<span class="mono">' . e($s['host']) . '</s
         <?php else: ?>—<?php endif; ?>
       </dd>
       <dt>Mark renewed</dt><dd>
+        <?php if (can('edit')): ?>
         <form method="post" action="<?= e(url('server_edit.php')) ?>" class="renew-form" data-confirm="Mark <?= e($s['name']) ?> as renewed? The next due date moves forward from <?= e($s['expires_at'] ? date('d M Y', strtotime($s['expires_at'])) : 'today') ?>.">
           <?= csrf_field() ?><input type="hidden" name="action" value="renew"><input type="hidden" name="id" value="<?= $id ?>">
           <button class="btn btn-ghost xs" name="months" value="1" type="submit">+1 month</button>
@@ -129,6 +139,7 @@ layout_start($s['name'], 'servers', '<span class="mono">' . e($s['host']) . '</s
           <button class="btn btn-ghost xs" name="months" value="6" type="submit">+6 months</button>
           <button class="btn btn-ghost xs" name="months" value="12" type="submit">+1 year</button>
         </form>
+        <?php else: ?><span class="muted">—</span><?php endif; ?>
       </dd>
       <dt>Added</dt><dd><?= e(fmt_time($s['created_at'], 'd M Y')) ?></dd>
     </dl>
@@ -138,7 +149,7 @@ layout_start($s['name'], 'servers', '<span class="mono">' . e($s['host']) . '</s
 
 <section class="card glass table-card anim-in" style="--d:.2s">
   <div class="card-head"><h3><?= icon('key') ?>Licenses &amp; services on this server</h3>
-    <a class="btn btn-ghost xs" href="<?= e(url('service_edit.php?server=' . $id)) ?>"><?= icon('plus') ?>Add license</a></div>
+    <?php if (can('edit')): ?><a class="btn btn-ghost xs" href="<?= e(url('service_edit.php?server=' . $id)) ?>"><?= icon('plus') ?>Add license</a><?php endif; ?></div>
   <?php if (!$services): ?>
     <div class="mini-empty"><?= icon('key') ?>No licenses linked. Add cPanel / LiteSpeed / CloudLinux licenses to get renewal reminders.</div>
   <?php else: ?>
@@ -175,7 +186,7 @@ layout_start($s['name'], 'servers', '<span class="mono">' . e($s['host']) . '</s
           <td><?= e(fmt_time($i['started_at'], 'd M Y, h:i:s A')) ?></td>
           <td><?= $open ? '—' : e(fmt_time($i['ended_at'], 'd M Y, h:i:s A')) ?></td>
           <td><b <?= $open ? 'data-since="' . (int) $i['started_at'] . '"' : '' ?>><?= e(fmt_duration($open ? $now - (int) $i['started_at'] : (int) $i['duration'], 3)) ?></b></td>
-          <td class="mono small muted"><?= e((string) $i['cause']) ?></td>
+          <td><?php $why = diagnose_short((string) $i['cause'], $s); ?><?= $why ? '<b class="small">' . e($why) . '</b>' : '' ?><div class="mono small muted"><?= e((string) $i['cause']) ?></div></td>
         </tr>
       <?php endforeach; ?>
       </tbody>

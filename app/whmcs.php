@@ -821,9 +821,14 @@ function provider_save_services(int $providerId, array $list, bool $replace = tr
     $seen = [];
     $linked = 0;
     $logins = 0;
+    $ignored = array_flip(array_map('strval', array_column(
+        rows('SELECT remote_id FROM ignored_services WHERE provider_id = ? AND source = ?', [$providerId, $source]), 'remote_id')));
     foreach ($list as $s) {
         if (service_is_ended($s['status'])) {
             continue; // cancelled / terminated services are not kept
+        }
+        if (isset($ignored[(string) $s['id']])) {
+            continue; // you deleted this one on purpose
         }
         $due = whmcs_parse_date($s['next_due_raw'], $order);
         $existing = row('SELECT id, name, kind, kind_locked, server_id, ip, hostname, amount, client_id FROM provider_services WHERE provider_id = ? AND source = ? AND remote_id = ?', [$providerId, $source, $s['id']]);
