@@ -916,3 +916,14 @@ a.stat:hover { transform: translateY(-3px); border-color: var(--border-hi); }
 .diag-more > summary::before { content: '▸'; transition: transform .2s; }
 .diag-more[open] > summary::before { transform: rotate(90deg); }
 .diag-cmds .secret-box { padding: 6px 8px 6px 12px; }
+
+/* team: password box with show / copy / generate */
+.pw-box { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.pw-box .input { flex: 1 1 170px; min-width: 0; }
+.pw-box .btn.sm { white-space: nowrap; }
+.team-form-title { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 14px; }
+.team-form-title .ico { width: 16px; height: 16px; }
+.team-edit-row .team-forms { grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr) minmax(0, .8fr); }
+@media (max-width: 1100px) { .team-edit-row .team-forms { grid-template-columns: 1fr; } .team-edit-row .team-forms form + form { padding-left: 0; border-left: 0; padding-top: 14px; border-top: 1px dashed var(--border); } }
+.field label.check { flex-wrap: nowrap; align-items: flex-start; }
+.field label.check input { flex: none; margin-top: 3px; }

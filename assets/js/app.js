@@ -90,6 +90,18 @@
   }
 
   /* ---------- copy ---------- */
+  // Strong random password from the browser's CSPRNG: always has upper, lower, digit and a symbol;
+  // look-alike characters (0/O, 1/l/I) are left out so it can be read out or typed without mistakes.
+  function genPassword(len) {
+    var sets = ['ABCDEFGHJKLMNPQRSTUVWXYZ', 'abcdefghijkmnpqrstuvwxyz', '23456789', '@#%+=?!'];
+    var all = sets.join('');
+    var rnd = function (n) { var a = new Uint32Array(1); window.crypto.getRandomValues(a); return a[0] % n; };
+    var out = sets.map(function (s) { return s.charAt(rnd(s.length)); });
+    while (out.length < len) out.push(all.charAt(rnd(all.length)));
+    for (var i = out.length - 1; i > 0; i--) { var j = rnd(i + 1); var tmp = out[i]; out[i] = out[j]; out[j] = tmp; }
+    return out.join('');
+  }
+
   function copyText(text, btn) {
     var done = function () {
       toast('success', 'Copied to clipboard');
@@ -468,6 +480,18 @@
   document.addEventListener('click', function (e) {
     var t;
     if ((t = e.target.closest('[data-copy]'))) { e.preventDefault(); copyText(t.getAttribute('data-copy'), t); return; }
+    if ((t = e.target.closest('[data-copy-from]'))) {
+      e.preventDefault();
+      var src = $(t.getAttribute('data-copy-from'));
+      if (src && src.value) copyText(src.value, t); else toast('error', 'Nothing to copy yet — type or generate a password first.');
+      return;
+    }
+    if ((t = e.target.closest('[data-gen-pw]'))) {
+      e.preventDefault();
+      var target = $(t.getAttribute('data-gen-pw'));
+      if (target) { target.type = 'text'; target.value = genPassword(16); target.dispatchEvent(new Event('input', { bubbles: true })); target.focus(); target.select(); }
+      return;
+    }
     if ((t = e.target.closest('[data-sidebar-open]'))) { document.body.classList.add('nav-open'); return; }
     if ((t = e.target.closest('[data-sidebar-close]'))) { document.body.classList.remove('nav-open'); return; }
     if ((t = e.target.closest('#btnCheckAll'))) { runCheck(t, null); return; }

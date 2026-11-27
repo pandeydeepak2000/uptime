@@ -230,17 +230,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     throw new InvalidArgumentException('A team member with that email or name already exists.');
                 }
                 if ($err = password_strength_error($pw)) {
-                    throw new InvalidArgumentException('Temporary password: ' . $err);
+                    throw new InvalidArgumentException('Their password: ' . $err);
                 }
+                $force = isset($_POST['force_change']) ? 1 : 0;
                 $newId = db_insert('users', [
                     'username' => $name, 'email' => $email, 'password_hash' => password_hash($pw, password_algo()),
                     'role' => $role, 'can_reveal' => $role === 'admin' || isset($_POST['can_reveal']) ? 1 : 0,
-                    'active' => 1, 'must_change_pw' => 1, 'session_epoch' => 0, 'totp_enabled' => 0,
+                    'active' => 1, 'must_change_pw' => $force, 'session_epoch' => 0, 'totp_enabled' => 0,
                     'created_by' => $uid, 'created_at' => time(),
                 ]);
                 audit('user_added', $name . ' <' . $email . '> as ' . ROLES[$role] . ' (id ' . $newId . ')');
                 $teamAlert('➕ Added <b>' . e($name) . '</b> (' . e($email) . ') as <b>' . e(ROLES[$role]) . '</b> by ' . e($user['username']));
-                flash('success', 'Added ' . $name . '. Share the email + temporary password privately — they must set their own password at first login.');
+                flash('success', 'Added ' . $name . '. Share the email + password privately (not in a group chat)' . ($force ? ' — they will choose their own password at first login.' : '.'));
                 break;
 
             case 'user_update':
@@ -294,16 +295,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 $pw = (string) ($_POST['password'] ?? '');
                 if ($err = password_strength_error($pw)) {
-                    throw new InvalidArgumentException('Temporary password: ' . $err);
+                    throw new InvalidArgumentException('New password: ' . $err);
                 }
-                $upd = ['password_hash' => password_hash($pw, password_algo()), 'must_change_pw' => 1, 'session_epoch' => (int) $t['session_epoch'] + 1];
+                $force = isset($_POST['force_change']) ? 1 : 0;
+                $upd = ['password_hash' => password_hash($pw, password_algo()), 'must_change_pw' => $force, 'session_epoch' => (int) $t['session_epoch'] + 1];
                 if (isset($_POST['reset_2fa'])) {
                     $upd += ['totp_secret' => null, 'totp_enabled' => 0];
                 }
                 db_update('users', $upd, 'id = ?', [$tid]);
-                audit('user_password_reset', $t['username'] . ' (id ' . $tid . ')' . (isset($_POST['reset_2fa']) ? ' + 2FA reset' : ''));
-                $teamAlert('🔑 Password reset for <b>' . e($t['username']) . '</b>' . (isset($_POST['reset_2fa']) ? ' (2FA also reset)' : '') . ' by ' . e($user['username']));
-                flash('success', 'New temporary password set for ' . $t['username'] . '. They were signed out and must choose their own password at next login.');
+                audit('user_password_reset', $t['username'] . ' (id ' . $tid . ')' . (isset($_POST['reset_2fa']) ? ' + 2FA reset' : '') . ($force ? ' (must change at next login)' : ''));
+                $teamAlert('🔑 Password changed for <b>' . e($t['username']) . '</b>' . (isset($_POST['reset_2fa']) ? ' (2FA also reset)' : '') . ' by ' . e($user['username']));
+                flash('success', 'Password changed for ' . $t['username'] . '. They were signed out' . ($force ? ' and will choose their own password at next login.' : ' — they log in with the new password.'));
                 break;
 
             case 'user_delete':
@@ -342,7 +344,15 @@ $hasToken = setting('tg_token', '') !== '';
 $chk = fn ($k) => setting($k) === '1' ? 'checked' : '';
 
 $team = $isAdmin ? rows('SELECT id, username, email, role, can_reveal, active, totp_enabled, must_change_pw, last_login_at, last_login_ip, created_at FROM users ORDER BY active DESC, role, username') : [];
-$suggestPw = 'Up' . bin2hex(random_bytes(5)) . '-' . random_int(10, 99) . 'X';
+// Password box for team members: type one, or press Generate (browser CSPRNG); copy + show/hide.
+$pwField = function (string $id, string $label): string {
+    return '<div class="field"><label>' . $label . '</label>'
+        . '<div class="pw-box"><input class="input mono" id="' . $id . '" type="password" name="password" required minlength="10" autocomplete="new-password" placeholder="Type one or press Generate" spellcheck="false">'
+        . '<button class="icon-btn" type="button" data-toggle-pw="#' . $id . '" title="Show / hide">' . icon('eye') . '</button>'
+        . '<button class="icon-btn" type="button" data-copy-from="#' . $id . '" title="Copy">' . icon('copy') . '</button>'
+        . '<button class="btn btn-ghost sm" type="button" data-gen-pw="#' . $id . '">' . icon('refresh') . 'Generate</button></div>'
+        . '<span class="hint">Min 10 characters with upper case, lower case and a number.</span></div>';
+};
 
 layout_start($isAdmin ? 'Settings' : 'My account', 'settings', $isAdmin ? 'Monitoring, Telegram alerts, team, security &amp; cron.' : 'Your login, password and two-factor authentication.');
 ?>
@@ -436,7 +446,7 @@ layout_start($isAdmin ? 'Settings' : 'My account', 'settings', $isAdmin ? 'Monit
             <tbody>
             <?php foreach ($team as $m): $self = (int) $m['id'] === $uid; ?>
               <tr class="<?= (int) $m['active'] ? '' : 'row-dim' ?>">
-                <td><b><?= e($m['username']) ?></b><?= $self ? ' <span class="pill pill-up xs">You</span>' : '' ?><?= (int) $m['active'] ? '' : ' <span class="pill pill-down xs">Disabled</span>' ?><?= (int) $m['must_change_pw'] ? ' <span class="pill pill-warn xs" title="Has not set their own password yet">Temp password</span>' : '' ?>
+                <td><b><?= e($m['username']) ?></b><?= $self ? ' <span class="pill pill-up xs">You</span>' : '' ?><?= (int) $m['active'] ? '' : ' <span class="pill pill-down xs">Disabled</span>' ?><?= (int) $m['must_change_pw'] ? ' <span class="pill pill-warn xs" title="Must choose their own password at next login">Must change password</span>' : '' ?>
                   <div class="cell-sub mono"><?= e((string) $m['email']) ?></div></td>
                 <td><span class="pill xs <?= $m['role'] === 'admin' ? 'pill-host' : ($m['role'] === 'support' ? 'pill-up' : 'pill-unknown') ?>"><?= e(ROLES[$m['role']] ?? $m['role']) ?></span></td>
                 <td><?= $m['role'] === 'admin' || ($m['role'] === 'support' && (int) $m['can_reveal']) ? '<span class="txt-warn small">Can view</span>' : '<span class="muted small">No</span>' ?></td>
@@ -465,10 +475,13 @@ layout_start($isAdmin ? 'Settings' : 'My account', 'settings', $isAdmin ? 'Monit
                       </form>
                       <form method="post" class="form-grid" autocomplete="off">
                         <?= csrf_field() ?><input type="hidden" name="section" value="user_reset"><input type="hidden" name="id" value="<?= (int) $m['id'] ?>">
-                        <div class="field"><label>New temporary password</label><input class="input mono" name="password" value="<?= e('Up' . bin2hex(random_bytes(5)) . '-' . random_int(10, 99) . 'X') ?>" required></div>
-                        <div class="field"><label>&nbsp;</label><label class="check"><input type="checkbox" name="reset_2fa"> Also reset their 2FA (lost phone)</label></div>
+                        <div class="field col-2"><h4 class="team-form-title"><?= icon('key') ?>Change password of <?= e($m['username']) ?></h4></div>
+                        <?= $pwField('pw-' . (int) $m['id'], 'New password') ?>
+                        <div class="field"><label>&nbsp;</label>
+                          <label class="check"><input type="checkbox" name="force_change"> Make them choose their own password at next login</label>
+                          <label class="check"><input type="checkbox" name="reset_2fa"> Also reset their 2FA (lost phone)</label></div>
                         <div class="field col-2"><label>Your password <span class="muted small">(to confirm)</span></label><input class="input" type="password" name="admin_password" required autocomplete="current-password"></div>
-                        <div class="form-actions col-2"><button class="btn btn-ghost sm" type="submit"><?= icon('key') ?>Reset password</button></div>
+                        <div class="form-actions col-2"><button class="btn btn-ghost sm" type="submit"><?= icon('key') ?>Change password</button></div>
                       </form>
                       <form method="post" class="form-grid" autocomplete="off" data-confirm="Delete <?= e($m['username']) ?>? They will not be able to log in. Their activity stays in the log.">
                         <?= csrf_field() ?><input type="hidden" name="section" value="user_delete"><input type="hidden" name="id" value="<?= (int) $m['id'] ?>">
@@ -492,15 +505,15 @@ layout_start($isAdmin ? 'Settings' : 'My account', 'settings', $isAdmin ? 'Monit
           <div class="field"><label>Login email</label><input class="input" type="email" name="email" required placeholder="rahul@company.com" autocomplete="off"></div>
           <div class="field"><label>Role</label><select class="input" name="role"><option value="support" selected><?= e(ROLES['support']) ?></option><option value="viewer"><?= e(ROLES['viewer']) ?></option><option value="admin"><?= e(ROLES['admin']) ?></option></select></div>
           <div class="field"><label>&nbsp;</label><label class="check"><input type="checkbox" name="can_reveal"> Can view root passwords</label></div>
-          <div class="field"><label>Temporary password <span class="muted small">(share privately)</span></label>
-            <div class="secret-box"><input class="input mono" name="password" value="<?= e($suggestPw) ?>" required><button class="icon-btn" type="button" data-copy="<?= e($suggestPw) ?>" title="Copy"><?= icon('copy') ?></button></div></div>
+          <?= $pwField('pw-new', 'Their password <span class="muted small">(share privately)</span>') ?>
           <div class="field"><label>Your password <span class="muted small">(to confirm)</span></label><input class="input" type="password" name="admin_password" required autocomplete="current-password"></div>
+          <div class="field col-2"><label class="check"><input type="checkbox" name="force_change"> Make them choose their own password at first login <span class="muted small">(more private — then even you won't know it)</span></label></div>
         </div>
         <ul class="sec-list">
           <li><?= icon('check') ?><b>Support</b> — check servers, pause/resume, add &amp; edit servers, licenses and clients. Root passwords only if you tick the box (every view is logged). No settings, provider logins, deleting or team changes.</li>
           <li><?= icon('check') ?><b>Viewer</b> — read-only dashboard, servers, licenses, clients and reports.</li>
           <li><?= icon('check') ?><b>Admin</b> — everything, including this page.</li>
-          <li><?= icon('check') ?>They must set their own password at first login and can turn on 2FA. Only an admin can change their email. Changing role / email / status signs them out everywhere.</li>
+          <li><?= icon('check') ?><span>You can change any member's password later from <b>Manage</b>. They can also change it and turn on 2FA under “My account”. Only an admin can change their email. Changing role / email / status signs them out everywhere.</span></li>
         </ul>
         <div class="form-actions"><button class="btn btn-primary" type="submit"><?= icon('plus') ?>Add member</button></div>
       </form>
