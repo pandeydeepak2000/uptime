@@ -35,9 +35,35 @@ function base_path(): string
     return $bp = rtrim($dir, '/') . '/';
 }
 
+/**
+ * Clean URLs (/login instead of /login.php) — only when the web server is really rewriting them,
+ * so links never break on a host without mod_rewrite (or the local `php -S` server).
+ * Proof: .htaccess sets CLEAN_URLS=1, or this request itself arrived as /page and ran page.php.
+ */
+function clean_urls(): bool
+{
+    static $on = null;
+    if ($on !== null) {
+        return $on;
+    }
+    foreach (['CLEAN_URLS', 'REDIRECT_CLEAN_URLS'] as $k) {
+        if (($_SERVER[$k] ?? getenv($k)) === '1') {
+            return $on = true;
+        }
+    }
+    $script = basename((string) ($_SERVER['SCRIPT_NAME'] ?? ''), '.php');
+    $path = (string) parse_url((string) ($_SERVER['REQUEST_URI'] ?? ''), PHP_URL_PATH);
+    return $on = $script !== '' && $script !== 'index' && basename($path) === $script;
+}
+
 function url(string $path = ''): string
 {
-    return base_path() . ltrim($path, '/');
+    $path = ltrim($path, '/');
+    if (clean_urls()) {
+        // page.php?x=1 → page?x=1   (api, cron and the installer keep their .php address)
+        $path = preg_replace('~^(?!(?:index|api|cron|install)\.php)([a-z_]+)\.php(?=$|[?#])~', '$1', $path);
+    }
+    return base_path() . $path;
 }
 
 function is_https(): bool

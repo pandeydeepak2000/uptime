@@ -13,6 +13,20 @@ ServerSignature Off
   RewriteRule ^(app|storage)(/|$) - [F,L]
   # Block sensitive file types
   RewriteRule \.(sqlite|sqlite3|db|log|md|lock|sql|ini|sh|bak|json|dist|zip|tar|gz|tgz|rar|7z)$ - [F,L,NC]
+
+  # ---- Clean URLs: /login instead of /login.php ----
+  # Tell PHP rewriting works, so the app prints links without .php
+  RewriteRule ^ - [E=CLEAN_URLS:1]
+  # Old address typed or bookmarked (GET only — form posts are never redirected):
+  #   /login.php?x=1  →  /login?x=1   (api, cron, installer and index keep .php)
+  RewriteCond %{REQUEST_URI} !/(index|api|cron|install)\.php$ [NC]
+  RewriteCond %{THE_REQUEST} ^(?:GET|HEAD)\s/([^?\s]*?)([a-z_]+)\.php(?:[?\s]) [NC]
+  RewriteRule ^ /%1%2 [R=302,L]
+  # /login  →  runs login.php (only if that file really exists)
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteCond %{REQUEST_FILENAME} !-d
+  RewriteCond %{REQUEST_FILENAME}.php -f
+  RewriteRule ^([a-z_]+)$ $1.php [L]
 </IfModule>
 
 <FilesMatch "(^\.|\.(sqlite|sqlite3|db|log|md|lock|sql|ini|sh|bak|zip|tar|gz|tgz|rar|7z)$)">
