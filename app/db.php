@@ -83,7 +83,7 @@ function db_update(string $table, array $data, string $where, array $params = []
     return q($sql, array_merge(array_values($data), $params))->rowCount();
 }
 
-const DB_VERSION = 6;
+const DB_VERSION = 7;
 
 /**
  * Upgrade an existing database in place (runs once per version bump).
@@ -138,6 +138,22 @@ function db_migrate(): void
         $addColumn('ALTER TABLE servers ADD COLUMN client_id INT NULL');
         $addColumn('ALTER TABLE provider_services ADD COLUMN client_id INT NULL');
     }
+    if ($v < 7) {
+        // 1 = type picked by hand on the service page; the sync then keeps it
+        $addColumn('ALTER TABLE provider_services ADD COLUMN kind_locked INT NOT NULL DEFAULT 0');
+        // re-check stored types with the better detection (adds "reseller", stops hostnames like
+        // sharedserver.com from making a hosting account look like a VPS, license shops → license)
+        foreach (rows('SELECT ps.id, ps.name, ps.kind, p.name AS pname, p.website, p.panel_url
+                       FROM provider_services ps LEFT JOIN providers p ON p.id = ps.provider_id') as $r) {
+            $g = service_kind((string) $r['name']);
+            if ($g !== 'reseller' && preg_match('/licen[cs]/i', $r['pname'] . ' ' . $r['website'] . ' ' . $r['panel_url'])) {
+                $g = 'license';
+            }
+            if ($g !== 'other' && $g !== $r['kind']) {
+                db_update('provider_services', ['kind' => $g], 'id = ?', [(int) $r['id']]);
+            }
+        }
+    }
     setting_set('db_version', DB_VERSION);
 }
 
@@ -175,6 +191,7 @@ function db_services_schema(string $driver): array
             `remote_id` VARCHAR(32) NULL,
             `name` VARCHAR(190) NOT NULL,
             `kind` VARCHAR(16) NOT NULL DEFAULT 'other',
+            `kind_locked` INT NOT NULL DEFAULT 0,
             `hostname` VARCHAR(190) NULL,
             `ip` VARCHAR(64) NULL,
             `status` VARCHAR(32) NULL,

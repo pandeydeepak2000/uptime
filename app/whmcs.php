@@ -531,6 +531,8 @@ class WhmcsClient
                 'id'           => $id,
                 'name'         => substr((isset($tds[$cols['name']]) ? self::cellTitle($tds[$cols['name']]) : '') ?: ($nameLines[0] ?? ('Service #' . $id)), 0, 190),
                 'hostname'     => $host,
+                // product group / description lines (not host or IP) — helps tell hosting from VPS
+                'group'        => substr(implode(' ', array_filter($nameLines, fn ($l) => !valid_host(strtolower(trim($l))) && !filter_var(trim($l), FILTER_VALIDATE_IP))), 0, 300),
                 'ip'           => $ip,
                 'status'       => substr(ucfirst(strtolower(trim(preg_match('/\b(Active|Suspended|Pending|Cancelled|Terminated|Fraud|Completed)\b/i', $statusText . ' ' . $all, $sm) ? $sm[1] : $statusText))), 0, 32),
                 'amount'       => $amount,
@@ -699,15 +701,21 @@ function service_state(?string $status): string
     return $s === '' ? 'active' : (in_array($s, ['active', 'suspended', 'pending'], true) ? $s : 'other');
 }
 
-function service_kind(string $name): string
+function service_kind(string $name, string $context = ''): string
 {
-    if (preg_match('/licen[cs]e|cpanel|whm|plesk|litespeed|lsws|cloudlinux|softaculous|imunify|jetbackup|sitepad|directadmin|kernelcare|whmreseller|virtualizor|solusvm/i', $name)) {
+    // hostnames are NOT used: "sharedserver.com" or "server1.host.com" say nothing about the product
+    $t = $name . ' ' . $context;
+    $isVps = preg_match('/\b(vps|vds|kvm|dedicated|bare ?metal|openvz)/i', $t);
+    if (preg_match('/licen[cs]e/i', $t)) {
         return 'license';
     }
-    if (preg_match('/reseller|shared hosting|web hosting|email hosting|domain/i', $name) && !preg_match('/vps|vds|kvm/i', $name)) {
-        return 'other';
+    if (!$isVps && preg_match('/reseller|hosting|shared|wordpress|woocommerce|email plan|web ?space/i', $t)) {
+        return 'reseller';
     }
-    if (preg_match('/vps|kvm|vds|cloud|server|dedicated|ssd|nvme|openvz|ryzen|xeon|epyc/i', $name)) {
+    if (preg_match('/cpanel|\bwhm|plesk|litespeed|lsws|cloudlinux|softaculous|imunify|jetbackup|sitepad|directadmin|kernelcare|virtualizor|solusvm|webuzo|whmcs|blesta|installatron|backuply|whmsonic|fleetssl|\bcxs\b|\bosm\b|daloradius/i', $t)) {
+        return 'license';
+    }
+    if ($isVps || preg_match('/cloud|\bserver\b|\bssd|nvme|ryzen|xeon|epyc|\d+ ?gb\b/i', $t)) {
         return 'vps';
     }
     return 'other';
@@ -802,7 +810,10 @@ function provider_save_services(int $providerId, array $list, bool $replace = tr
     $goodHost = fn ($h) => $h && strpos($h, '.') !== false && valid_host($h);
 
     $now = time();
-    $servers = rows('SELECT id, host, provider_id, monthly_cost, expires_at, ssh_pass, client_id FROM servers');
+    $servers = rows('SELECT id, name, host, provider_id, monthly_cost, expires_at, ssh_pass, client_id FROM servers');
+    $prov = row('SELECT name, website, panel_url FROM providers WHERE id = ?', [$providerId]);
+    // a license shop (e.g. SharedLicense): everything bought there is a license
+    $licenseShop = $prov && preg_match('/licen[cs]/i', $prov['name'] . ' ' . $prov['website'] . ' ' . $prov['panel_url']);
     $byId = [];
     foreach ($servers as $srv) {
         $byId[(int) $srv['id']] = $srv;
@@ -815,12 +826,15 @@ function provider_save_services(int $providerId, array $list, bool $replace = tr
             continue; // cancelled / terminated services are not kept
         }
         $due = whmcs_parse_date($s['next_due_raw'], $order);
-        $existing = row('SELECT id, kind, server_id, ip, hostname, amount, client_id FROM provider_services WHERE provider_id = ? AND source = ? AND remote_id = ?', [$providerId, $source, $s['id']]);
+        $existing = row('SELECT id, name, kind, kind_locked, server_id, ip, hostname, amount, client_id FROM provider_services WHERE provider_id = ? AND source = ? AND remote_id = ?', [$providerId, $source, $s['id']]);
         $ip = $s['ip'] ?: ($existing['ip'] ?? '');
         $host = $goodHost($s['hostname']) ? $s['hostname'] : ($goodHost($existing['hostname'] ?? '') ? $existing['hostname'] : '');
-        $guess = service_kind($s['name'] . ' ' . $host);
-        // re-classify entries that were stored as "other" because of a placeholder name
-        $kind = ($existing && !($existing['kind'] === 'other' && $guess !== 'other')) ? $existing['kind'] : $guess;
+        $guess = service_kind($s['name'], (string) ($s['group'] ?? ''));
+        if ($licenseShop && $guess !== 'reseller') {
+            $guess = 'license';
+        }
+        // a type you picked by hand is kept; otherwise the (improved) detection decides on every sync
+        $kind = $existing && ((int) $existing['kind_locked'] || $guess === 'other') ? $existing['kind'] : $guess;
         $loginPass = (string) ($s['login_pass'] ?? '');
         $loginUser = (string) ($s['login_user'] ?? '');
 
@@ -838,6 +852,11 @@ function provider_save_services(int $providerId, array $list, bool $replace = tr
             $srv = $byId[$serverId];
             if ($kind !== 'license') {
                 $upd = [];
+                // server was created from this service under its old (e.g. placeholder) name → follow the new name
+                if ($existing && $srv['name'] === substr((string) $existing['name'], 0, 100) && $s['name'] !== $existing['name']
+                    && !preg_match('/^Service #\d+$/', $s['name'])) {
+                    $upd['name'] = substr($s['name'], 0, 100);
+                }
                 if ($due) {
                     $upd['expires_at'] = $due;
                 }

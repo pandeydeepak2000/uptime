@@ -448,7 +448,7 @@ p { margin: 0 0 .6em; }
 .renew-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 12px; background: rgba(var(--tint), .04); border: 1px solid var(--border); }
 .renew-row:hover { border-color: var(--border-hi); }
 .mini-empty { display: flex; align-items: center; gap: 10px; padding: 22px; border-radius: 14px; background: rgba(16, 229, 160, .05); border: 1px dashed rgba(16, 229, 160, .25); color: var(--text-2); }
-.mini-empty .ico { color: var(--up); }
+.mini-empty .ico { color: var(--up); width: 20px; height: 20px; flex-shrink: 0; }
 
 /* ---------- empty state ---------- */
 .empty { text-align: center; padding: 56px 20px; }
@@ -876,3 +876,7 @@ thead .sticky-col { background: var(--panel-solid); }
 }
 .table th.right { text-align: right; }
 .pay-row .prov-badge, .pay-row .pill { justify-self: start; }
+.pill-host { background: rgba(124, 92, 255, .14); color: #8b6cff; border-color: rgba(124, 92, 255, .3); }
+:root[data-theme="light"] .pill-host { color: #5b3fd6; }
+.lic-on { display: inline-flex; align-items: center; gap: 4px; }
+.lic-on .ico { width: 12px; height: 12px; }

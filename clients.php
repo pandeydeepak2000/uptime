@@ -48,11 +48,10 @@ $byProvider = function (array $its): array {
     uasort($g, fn ($a, $b) => strcasecmp((string) $a['name'], (string) $b['name']));
     return $g;
 };
-$kindMeta = ['license' => ['🔑 License', 'pill-warn'], 'vps' => ['🖥 Server', 'pill-up'], 'other' => ['📦 Other', 'pill-unknown']];
 $today = strtotime('today');
 
 /** One table used both for "assign" (overview) and for a single client's items. */
-$itemsTable = function (array $its, string $tableId, string $back) use ($byId, $kindMeta, $today, $clients) {
+$itemsTable = function (array $its, string $tableId, string $back) use ($byId, $today, $clients) {
     ob_start(); ?>
   <form method="post" action="<?= e(url('clients.php')) ?>" class="assign-form" id="<?= e($tableId) ?>Form">
     <?= csrf_field() ?><input type="hidden" name="back" value="<?= e($back) ?>">
@@ -62,18 +61,22 @@ $itemsTable = function (array $its, string $tableId, string $back) use ($byId, $
           <th>Server / license</th><th>Type</th><th>Provider (you pay)</th><th>Used by</th><th class="right">Monthly</th><th>Next due</th><th class="right sticky-col"></th></tr></thead>
         <tbody>
         <?php foreach ($its as $it):
-            $k = $kindMeta[$it['kind']];
             $cl = $it['client_id'] !== null ? ($byId[$it['client_id']] ?? null) : null;
             $left = $it['next_due'] ? (int) round((strtotime($it['next_due']) - $today) / 86400) : null; ?>
           <tr data-status="<?= e($it['kind']) ?>" data-client="<?= $cl ? (int) $cl['id'] : 'own' ?>" data-provider="<?= (int) $it['provider_id'] ?>"
-              data-search="<?= e(strtolower($it['name'] . ' ' . $it['sub'] . ' ' . $it['provider_name'] . ' ' . ($cl['name'] ?? 'own'))) ?>">
+              data-search="<?= e(strtolower($it['name'] . ' ' . $it['sub'] . ' ' . $it['server_name'] . ' ' . $it['provider_name'] . ' ' . ($cl['name'] ?? 'own'))) ?>">
             <td class="w-check"><input type="checkbox" name="items[]" value="<?= e($it['key']) ?>" data-row-check></td>
             <td>
-              <?php if ($it['server_id']): ?><a class="cell-title" href="<?= e(url('server.php?id=' . $it['server_id'])) ?>"><?= e($it['name']) ?></a>
-              <?php else: ?><span class="cell-title"><?= e($it['name']) ?></span><?php endif; ?>
-              <div class="cell-sub"><?php if ($it['status']): ?><span class="dot dot-<?= e(in_array($it['status'], ['up', 'down'], true) ? $it['status'] : 'unknown') ?>"></span><?php endif; ?><span class="mono"><?= e($it['sub'] ?: '—') ?></span></div>
+              <?php if ($it['kind'] === 'license'): ?>
+                <span class="cell-title"><?= e($it['name']) ?></span>
+                <div class="cell-sub"><?php if ($it['server_name']): ?><a class="lic-on link" href="<?= e(url('server.php?id=' . $it['server_id'])) ?>" title="License is used on this server"><?= icon('server') ?><?= e($it['server_name']) ?></a> · <?php endif; ?><span class="mono"><?= e($it['sub'] ?: 'no IP') ?></span></div>
+              <?php else: ?>
+                <?php if ($it['server_id']): ?><a class="cell-title" href="<?= e(url('server.php?id=' . $it['server_id'])) ?>"><?= e($it['name']) ?></a>
+                <?php else: ?><span class="cell-title"><?= e($it['name']) ?></span><?php endif; ?>
+                <div class="cell-sub"><?php if ($it['status']): ?><span class="dot dot-<?= e(in_array($it['status'], ['up', 'down'], true) ? $it['status'] : 'unknown') ?>"></span><?php endif; ?><span class="mono"><?= e($it['sub'] ?: '—') ?></span></div>
+              <?php endif; ?>
             </td>
-            <td><span class="pill xs <?= $k[1] ?>"><?= $k[0] ?></span></td>
+            <td><?= kind_pill($it['kind']) ?></td>
             <td><?= provider_badge($it['provider_name'], $it['provider_color']) ?></td>
             <td><?= client_badge($cl) ?></td>
             <td class="right nowrap"><?php if ($it['monthly'] === 0.0): ?><span class="muted small">Not recurring</span>
@@ -108,8 +111,8 @@ if ($view !== null) {
     $title = $detail ? $detail['name'] : 'Own use';
     $sub = $detail ? trim(($detail['company'] ? $detail['company'] . ' · ' : '') . ($detail['email'] ?: '') . ($detail['phone'] ? ' · ' . $detail['phone'] : ''), ' ·')
                    : 'Servers and licenses you use yourself (not assigned to a client).';
-    $up = count(array_filter($its, fn ($it) => $it['kind'] === 'vps' && $it['status'] === 'up'));
-    $down = count(array_filter($its, fn ($it) => $it['kind'] === 'vps' && $it['status'] === 'down'));
+    $up = count(array_filter($its, fn ($it) => $it['kind'] !== 'license' && $it['status'] === 'up'));
+    $down = count(array_filter($its, fn ($it) => $it['kind'] !== 'license' && $it['status'] === 'down'));
     layout_start($title, 'clients', e($sub ?: 'Client'),
         '<a class="btn btn-ghost" href="' . e(url('clients.php')) . '">' . icon('arrow-left') . '<span class="hide-sm">All clients</span></a>'
         . ($detail ? '<a class="btn btn-ghost" href="' . e(url('client_edit.php?id=' . (int) $detail['id'])) . '">' . icon('edit') . '<span class="hide-sm">Edit</span></a>' : ''));
@@ -118,7 +121,7 @@ if ($view !== null) {
   <div class="card glass stat anim-in"><div class="stat-ico ico-green"><?= icon('server') ?></div><div><span class="stat-lbl">Servers</span><b class="stat-val"><?= $count($its, 'vps') ?></b>
     <span class="muted small"><?= $up ?> up<?= $down ? ' · <b class="txt-bad">' . $down . ' down</b>' : '' ?></span></div></div>
   <div class="card glass stat anim-in" style="--d:.05s"><div class="stat-ico ico-amber"><?= icon('key') ?></div><div><span class="stat-lbl">Licenses</span><b class="stat-val"><?= $count($its, 'license') ?></b></div></div>
-  <div class="card glass stat anim-in" style="--d:.1s"><div class="stat-ico ico-violet"><?= icon('list') ?></div><div><span class="stat-lbl">Other</span><b class="stat-val"><?= $count($its, 'other') ?></b></div></div>
+  <div class="card glass stat anim-in" style="--d:.1s"><div class="stat-ico ico-violet"><?= icon('list') ?></div><div><span class="stat-lbl">Hosting / other</span><b class="stat-val"><?= $count($its, 'reseller') ?> <small>/ <?= $count($its, 'other') ?></small></b></div></div>
   <div class="card glass stat anim-in" style="--d:.15s"><div class="stat-ico ico-cyan"><?= icon('dollar') ?></div><div><span class="stat-lbl">You pay / month</span><b class="stat-val small-val"><?= e(money_fmt(money_totals($its))) ?></b></div></div>
   <div class="card glass stat anim-in" style="--d:.2s"><div class="stat-ico ico-red"><?= icon('alert') ?></div><div><span class="stat-lbl">Without price</span><b class="stat-val"><?= items_unpriced($its) ?></b></div></div>
 </section>
@@ -130,7 +133,7 @@ if ($view !== null) {
   <div class="pay-list">
     <?php foreach ($byProvider($its) as $g): ?>
       <div class="pay-row"><?= provider_badge($g['name'], $g['color']) ?>
-        <span class="muted small"><?= $count($g['items'], 'vps') ?> server · <?= $count($g['items'], 'license') ?> license<?= $count($g['items'], 'other') ? ' · ' . $count($g['items'], 'other') . ' other' : '' ?></span>
+        <span class="muted small"><?= $count($g['items'], 'vps') ?> server · <?= $count($g['items'], 'license') ?> license<?= $count($g['items'], 'reseller') ? ' · ' . $count($g['items'], 'reseller') . ' hosting' : '' ?><?= $count($g['items'], 'other') ? ' · ' . $count($g['items'], 'other') . ' other' : '' ?></span>
         <b><?= e(money_fmt(money_totals($g['items']))) ?></b></div>
     <?php endforeach; ?>
   </div>
@@ -172,8 +175,8 @@ layout_start('Clients & Billing', 'clients', 'Which servers and licenses are for
   foreach ($cards as $i => $card):
       $c = $card['c'];
       $its = $card['its'];
-      $up = count(array_filter($its, fn ($it) => $it['kind'] === 'vps' && $it['status'] === 'up'));
-      $down = count(array_filter($its, fn ($it) => $it['kind'] === 'vps' && $it['status'] === 'down'));
+      $up = count(array_filter($its, fn ($it) => $it['kind'] !== 'license' && $it['status'] === 'up'));
+      $down = count(array_filter($its, fn ($it) => $it['kind'] !== 'license' && $it['status'] === 'down'));
       $link = url('clients.php?id=' . ($c ? (int) $c['id'] : 'own')); ?>
     <article class="card glass prov-card anim-in" style="--pc:<?= e($c ? safe_color($c['color']) : '#64748b') ?>;--d:<?= $i * 0.04 ?>s">
       <div class="prov-top">
@@ -186,9 +189,9 @@ layout_start('Clients & Billing', 'clients', 'Which servers and licenses are for
       </div>
       <div class="prov-stats">
         <div><span class="lbl">Servers</span><b><?= $count($its, 'vps') ?></b></div>
-        <div><span class="lbl">Online</span><b class="txt-good"><?= $up ?></b></div>
-        <div><span class="lbl">Offline</span><b class="<?= $down ? 'txt-bad' : '' ?>"><?= $down ?></b></div>
+        <div><span class="lbl">Hosting</span><b><?= $count($its, 'reseller') ?></b></div>
         <div><span class="lbl">Licenses</span><b><?= $count($its, 'license') ?></b></div>
+        <div><span class="lbl">Offline</span><b class="<?= $down ? 'txt-bad' : '' ?>"><?= $down ?></b></div>
       </div>
       <div class="pay-list compact">
         <?php foreach ($byProvider($its) as $g): ?>
@@ -207,7 +210,7 @@ layout_start('Clients & Billing', 'clients', 'Which servers and licenses are for
   <div class="card-head"><h3><?= icon('building') ?>Who you pay every month</h3><span class="muted small">Per provider, split by client and own use</span></div>
   <div class="table-wrap">
     <table class="table table-compact">
-      <thead><tr><th>Provider</th><th>Servers</th><th>Licenses</th><th class="right">For clients</th><th class="right">Own use</th><th class="right">Total / month</th></tr></thead>
+      <thead><tr><th>Provider</th><th>Servers</th><th>Hosting</th><th>Licenses</th><th class="right">For clients</th><th class="right">Own use</th><th class="right">Total / month</th></tr></thead>
       <tbody>
       <?php foreach ($byProvider($items) as $pid => $g):
           $forClients = array_filter($g['items'], fn ($it) => $it['client_id'] !== null);
@@ -216,6 +219,7 @@ layout_start('Clients & Billing', 'clients', 'Which servers and licenses are for
         <tr>
           <td><?= provider_badge($g['name'], $g['color']) ?><?= $np ? '<div class="cell-sub"><a class="link small" href="' . e(url('clients.php?provider=' . (int) $pid . '#assign')) . '">' . $np . ' without price</a></div>' : '' ?></td>
           <td><?= $count($g['items'], 'vps') ?></td>
+          <td><?= $count($g['items'], 'reseller') ?></td>
           <td><?= $count($g['items'], 'license') ?></td>
           <td class="right nowrap"><?= e(money_fmt(money_totals($forClients))) ?></td>
           <td class="right nowrap"><?= e(money_fmt(money_totals($forOwn))) ?></td>
@@ -223,7 +227,7 @@ layout_start('Clients & Billing', 'clients', 'Which servers and licenses are for
         </tr>
       <?php endforeach; ?>
       </tbody>
-      <tfoot><tr><th>Total</th><th><?= $count($items, 'vps') ?></th><th><?= $count($items, 'license') ?></th>
+      <tfoot><tr><th>Total</th><th><?= $count($items, 'vps') ?></th><th><?= $count($items, 'reseller') ?></th><th><?= $count($items, 'license') ?></th>
         <th class="right nowrap"><?= e(money_fmt(money_totals($clientItems))) ?></th><th class="right nowrap"><?= e(money_fmt(money_totals($own))) ?></th>
         <th class="right nowrap"><?= e(money_fmt(money_totals($items))) ?></th></tr></tfoot>
     </table>
@@ -240,6 +244,7 @@ layout_start('Clients & Billing', 'clients', 'Which servers and licenses are for
     <div class="chips" data-filter-chips="#assignTable">
       <button class="chip active" data-status="all" type="button">All <b><?= count($items) ?></b></button>
       <button class="chip" data-status="vps" type="button">🖥 Servers <b><?= $count($items, 'vps') ?></b></button>
+      <?php if ($count($items, 'reseller')): ?><button class="chip" data-status="reseller" type="button">🏢 Hosting <b><?= $count($items, 'reseller') ?></b></button><?php endif; ?>
       <button class="chip" data-status="license" type="button">🔑 Licenses <b><?= $count($items, 'license') ?></b></button>
       <?php if ($count($items, 'other')): ?><button class="chip" data-status="other" type="button">📦 Other <b><?= $count($items, 'other') ?></b></button><?php endif; ?>
     </div>

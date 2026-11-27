@@ -14,7 +14,7 @@ $priceEditable = !$synced || $svc['source'] === 'ovh' || $svc['amount'] === null
 $providers = rows('SELECT id, name FROM providers ORDER BY name');
 $servers = rows('SELECT id, name, host FROM servers ORDER BY name');
 $errors = [];
-$kinds = ['license' => '🔑 License (cPanel, LiteSpeed, CloudLinux…)', 'vps' => '🖥 VPS / server', 'other' => '📦 Other service'];
+$kinds = ['license' => '🔑 License (cPanel, LiteSpeed, CloudLinux…)', 'vps' => '🖥 VPS / dedicated server', 'reseller' => '🏢 Hosting / reseller account (no root)', 'other' => '📦 Other service'];
 $cycles = ['Monthly', 'Quarterly', 'Semi-Annually', 'Annually', 'Biennially', 'One Time'];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -46,7 +46,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $serverId = null;
     }
     $cid = (int) post('client_id');
-    $d = ['kind' => $kind, 'server_id' => $serverId, 'notes' => post('notes', '', 3000) ?: null,
+    $d = ['kind' => $kind, 'kind_locked' => $svc && $svc['kind'] !== $kind ? 1 : (int) ($svc['kind_locked'] ?? 0), 'server_id' => $serverId, 'notes' => post('notes', '', 3000) ?: null,
           'client_id' => $cid && val('SELECT id FROM clients WHERE id = ?', [$cid]) ? $cid : null];
     if ($synced && $priceEditable) {
         $d += [

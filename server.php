@@ -19,6 +19,8 @@ $periods = [
 $bars = uptime_days(90, $id)[$id] ?? [];
 $incidents = rows('SELECT * FROM incidents WHERE server_id = ? ORDER BY started_at DESC LIMIT 50', [$id]);
 $services = rows('SELECT ps.*, p.name AS provider_name FROM provider_services ps LEFT JOIN providers p ON p.id = ps.provider_id WHERE ps.server_id = ? ORDER BY ps.kind, ps.name', [$id]);
+$isHosting = (bool) array_filter($services, fn ($sv) => $sv['kind'] === 'reseller');
+$client = $s['client_id'] ? row('SELECT * FROM clients WHERE id = ?', [(int) $s['client_id']]) : null;
 
 // response-time chart: last 24h, bucketed to 5 minutes
 $raw = rows('SELECT checked_at, ok, response_ms FROM checks WHERE server_id = ? AND checked_at >= ? ORDER BY checked_at', [$id, $now - 86400]);
@@ -41,7 +43,8 @@ $sshCmd = 'ssh ' . ($s['ssh_user'] ?: 'root') . '@' . $s['host'] . ((int) $s['ss
 
 $actions = '<a class="btn btn-ghost" href="' . e(url('server_edit.php?id=' . $id)) . '">' . icon('edit') . '<span class="hide-sm">Edit</span></a>'
     . '<button class="btn btn-ghost" type="button" data-check="' . $id . '">' . icon('refresh') . '<span class="hide-sm">Check now</span></button>';
-layout_start($s['name'], 'servers', '<span class="mono">' . e($s['host']) . '</span> · ' . e($s['provider_name'] ?? 'No provider'), $actions);
+layout_start($s['name'], 'servers', '<span class="mono">' . e($s['host']) . '</span> · ' . e($s['provider_name'] ?? 'No provider')
+    . ' · ' . kind_pill($isHosting ? 'reseller' : 'vps', false) . ' · ' . client_badge($client), $actions);
 ?>
 <section class="detail-hero card glass st-<?= e($m['cls']) ?> anim-in" data-server="<?= $id ?>" data-status="<?= e($m['status']) ?>">
   <div class="dh-status">
@@ -83,16 +86,21 @@ layout_start($s['name'], 'servers', '<span class="mono">' . e($s['host']) . '</s
 
 <section class="detail-grid">
   <div class="card glass anim-in vault-card" style="--d:.15s">
-    <div class="card-head"><h3><?= icon('key') ?>Root access</h3><span class="pill pill-up xs"><?= icon('lock') ?>Encrypted</span></div>
+    <div class="card-head"><h3><?= icon('key') ?><?= $isHosting ? 'Hosting account login' : 'Root access' ?></h3><span class="pill pill-up xs"><?= icon('lock') ?>Encrypted</span></div>
     <dl class="kv">
       <dt>Host / IP</dt><dd><span class="mono"><?= e($s['host']) ?></span><button class="copy-btn" type="button" data-copy="<?= e($s['host']) ?>"><?= icon('copy') ?></button></dd>
-      <dt>SSH user</dt><dd><span class="mono"><?= e($s['ssh_user'] ?: 'root') ?></span><button class="copy-btn" type="button" data-copy="<?= e($s['ssh_user'] ?: 'root') ?>"><?= icon('copy') ?></button></dd>
+      <?php if ($isHosting): ?><dt>Type</dt><dd><span class="muted small">Hosting / reseller account on a shared server — no root SSH. Save the cPanel / WHM login here if you want.</span></dd><?php endif; ?>
+      <dt><?= $isHosting ? 'Username' : 'SSH user' ?></dt><dd><?php $u = $s['ssh_user'] ?: 'root'; if ($isHosting && $u === 'root'): ?><span class="muted">Not saved</span><?php else: ?><span class="mono"><?= e($u) ?></span><button class="copy-btn" type="button" data-copy="<?= e($u) ?>"><?= icon('copy') ?></button><?php endif; ?></dd>
+      <?php if (!$isHosting): ?>
       <dt>SSH port</dt><dd class="mono"><?= (int) $s['ssh_port'] ?></dd>
       <dt>Host key</dt><dd><?= $s['ssh_fingerprint'] ? '<span class="mono small" title="Saved SSH host key fingerprint — auto-detect refuses to send the password if it changes">' . e($s['ssh_fingerprint']) . '</span>' : '<span class="muted small">Not verified yet — run Auto-detect in Edit</span>' ?></dd>
+      <?php endif; ?>
       <dt>Password</dt><dd><?php if ($s['ssh_pass']): ?><span class="mono">••••••••••••</span>
         <button class="btn btn-ghost xs" type="button" data-reveal="server" data-id="<?= $id ?>" data-label="<?= e($s['name']) ?>"><?= icon('eye') ?>Reveal</button><?php else: ?><span class="muted">Not saved</span><?php endif; ?></dd>
     </dl>
+    <?php if (!$isHosting): ?>
     <div class="secret-box"><code><?= e($sshCmd) ?></code><button class="icon-btn" type="button" data-copy="<?= e($sshCmd) ?>" title="Copy SSH command"><?= icon('copy') ?></button></div>
+    <?php endif; ?>
   </div>
 
   <div class="card glass anim-in" style="--d:.2s">
@@ -100,6 +108,7 @@ layout_start($s['name'], 'servers', '<span class="mono">' . e($s['host']) . '</s
     <dl class="kv">
       <dt>Provider</dt><dd><?= provider_badge($s['provider_name'], $s['provider_color']) ?>
         <?php if ($s['panel_url']): ?><a class="link small" href="<?= e($s['panel_url']) ?>" target="_blank" rel="noopener noreferrer">Panel ↗</a><?php endif; ?></dd>
+      <dt>Used by</dt><dd><a href="<?= e(url('clients.php?id=' . ($client ? (int) $client['id'] : 'own'))) ?>"><?= client_badge($client) ?></a> <a class="link small" href="<?= e(url('server_edit.php?id=' . $id)) ?>">change</a></dd>
       <dt>Check method</dt><dd><?= e(CHECK_TYPES[$s['check_type']] ?? $s['check_type']) ?><?= $s['check_type'] === 'tcp' ? ' · port ' . (int) $s['port'] : '' ?><?= $s['check_type'] === 'http' ? ' · ' . e($s['url']) : '' ?></dd>
       <dt>Location</dt><dd><?= e($s['location'] ?: '—') ?></dd>
       <dt>OS</dt><dd><?= e($s['os'] ?: '—') ?></dd>
@@ -138,7 +147,7 @@ layout_start($s['name'], 'servers', '<span class="mono">' . e($s['host']) . '</s
     <tbody>
     <?php foreach ($services as $sv): $l = $sv['next_due'] ? (int) round((strtotime($sv['next_due']) - strtotime('today')) / 86400) : null; ?>
       <tr>
-        <td><b><?= e($sv['name']) ?></b> <span class="muted small"><?= $sv['kind'] === 'license' ? '🔑' : '' ?> <?= $sv['source'] !== 'manual' ? 'synced' : 'manual' ?></span></td>
+        <td><b><?= e($sv['name']) ?></b> <?= kind_pill($sv['kind']) ?> <span class="muted small"><?= $sv['source'] !== 'manual' ? 'synced' : 'manual' ?><?= $sv['ip'] ? ' · <span class="mono">' . e($sv['ip']) . '</span>' : '' ?></span></td>
         <td><?= e($sv['provider_name'] ?? '—') ?></td>
         <td class="nowrap"><?= $sv['amount'] !== null ? e(($sv['currency'] ?? '') . ' ' . number_format((float) $sv['amount'], 2) . ' ' . strtolower((string) $sv['cycle'])) : '—' ?></td>
         <td class="nowrap"><?= $sv['next_due'] ? e(date('d M Y', strtotime($sv['next_due']))) . ' <span class="pill xs ' . ($l < 0 ? 'pill-down' : ($l <= 3 ? 'pill-warn' : 'pill-unknown')) . '">' . ($l < 0 ? 'Overdue' : $l . 'd') . '</span>' : '—' ?></td>

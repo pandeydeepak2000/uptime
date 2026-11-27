@@ -4,6 +4,11 @@ $user = require_login();
 
 $servers = rows('SELECT s.*, p.name AS provider_name, p.color AS provider_color
                  FROM servers s LEFT JOIN providers p ON p.id = s.provider_id ORDER BY p.name, s.name');
+$hosting = array_flip(array_map('intval', array_column(rows("SELECT DISTINCT server_id FROM provider_services WHERE kind = 'reseller' AND server_id IS NOT NULL"), 'server_id')));
+$licCount = [];
+foreach (rows("SELECT server_id, COUNT(*) AS c FROM provider_services WHERE kind = 'license' AND server_id IS NOT NULL GROUP BY server_id") as $lc) {
+    $licCount[(int) $lc['server_id']] = (int) $lc['c'];
+}
 $rep24 = [];
 foreach (build_report(time() - 86400, time())['servers'] as $r) {
     $rep24[(int) $r['id']] = $r;
@@ -46,7 +51,7 @@ layout_start('Servers', 'servers', 'All VPS & dedicated servers with encrypted r
         <tr data-server="<?= $id ?>" data-status="<?= e($m['status']) ?>" data-provider="<?= (int) $s['provider_id'] ?>"
             data-search="<?= e(strtolower($s['name'] . ' ' . $s['host'] . ' ' . $s['provider_name'] . ' ' . $s['location'] . ' ' . $s['os'])) ?>">
           <td class="cell-server">
-            <a class="cell-title" href="<?= e(url('server.php?id=' . $id)) ?>"><?= e($s['name']) ?></a>
+            <a class="cell-title" href="<?= e(url('server.php?id=' . $id)) ?>"><?= e($s['name']) ?></a><?= isset($hosting[$id]) ? ' ' . kind_pill('reseller') : '' ?><?= !empty($licCount[$id]) ? ' <span class="pill xs pill-warn" title="Licenses on this server">🔑 ' . $licCount[$id] . '</span>' : '' ?>
             <div class="cell-sub"><span class="mono"><?= e($s['host']) ?></span><button class="copy-btn" type="button" data-copy="<?= e($s['host']) ?>" title="Copy IP"><?= icon('copy') ?></button>
               <?= $s['ssh_pass'] ? '<span class="key-ok" title="Root password saved (encrypted)">' . icon('key') . '</span>' : '' ?></div>
             <?php if ($s['location']): ?><div class="cell-sub muted"><?= icon('pin') ?><?= e($s['location']) ?></div><?php endif; ?>

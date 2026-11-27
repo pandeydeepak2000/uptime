@@ -11,6 +11,25 @@ defined('APP_ROOT') || exit;
 
 const CURRENCIES = ['INR', 'USD', 'EUR', 'GBP', 'CAD', 'AED'];
 
+/** Service types: [icon, label, pill class] */
+const KINDS = [
+    'vps'      => ['🖥', 'VPS / Server', 'pill-up'],
+    'reseller' => ['🏢', 'Hosting / Reseller', 'pill-host'],
+    'license'  => ['🔑', 'License', 'pill-warn'],
+    'other'    => ['📦', 'Other', 'pill-unknown'],
+];
+
+function kind_key(?string $k): string
+{
+    return isset(KINDS[(string) $k]) ? (string) $k : 'other';
+}
+
+function kind_pill(?string $k, bool $short = true): string
+{
+    $m = KINDS[kind_key($k)];
+    return '<span class="pill xs ' . $m[2] . '">' . $m[0] . ' ' . e($short ? explode(' / ', $m[1])[0] : $m[1]) . '</span>';
+}
+
 function billing_items(): array
 {
     $servers = [];
@@ -42,8 +61,10 @@ function billing_items(): array
             'type'           => 'service',
             'id'             => (int) $ps['id'],
             'name'           => $ps['name'],
-            'sub'            => $ps['hostname'] ?: ($ps['ip'] ?: ($srv['host'] ?? '')),
-            'kind'           => in_array($ps['kind'], ['vps', 'license'], true) ? $ps['kind'] : 'other',
+            'sub'            => $ps['kind'] === 'license' ? ($ps['ip'] ?: ($srv['host'] ?? ($ps['hostname'] ?? '')))
+                                                          : ($ps['hostname'] ?: ($ps['ip'] ?: ($srv['host'] ?? ''))),
+            'server_name'    => $srv['name'] ?? null,
+            'kind'           => kind_key($ps['kind']),
             'provider_id'    => (int) $ps['provider_id'],
             'provider_name'  => $ps['provider_name'],
             'provider_color' => $ps['provider_color'],
@@ -69,6 +90,7 @@ function billing_items(): array
             'id'             => $sid,
             'name'           => $s['name'],
             'sub'            => $s['host'],
+            'server_name'    => null,
             'kind'           => 'vps',
             'provider_id'    => (int) $s['provider_id'],
             'provider_name'  => $s['provider_name'],
